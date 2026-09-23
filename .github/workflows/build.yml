@@ -1,4 +1,4 @@
-﻿name: Build
+name: Build
 
 on:
   push:
@@ -17,6 +17,7 @@ jobs:
                 -isysroot "$SDK" \
                 -dynamiclib -fobjc-arc \
                 -install_name @rpath/FullScreenBackTweak.dylib \
+                -framework UIKit \
                 -o FullScreenBackTweak.dylib \
                 FullScreenBackTweak.m
           ls -la
