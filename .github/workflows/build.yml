@@ -1,0 +1,26 @@
+﻿name: Build
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build dylib
+        run: |
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          clang -arch arm64 -arch arm64e \
+                -isysroot "$SDK" \
+                -dynamiclib -fobjc-arc \
+                -install_name @rpath/FullScreenBackTweak.dylib \
+                -o FullScreenBackTweak.dylib \
+                FullScreenBackTweak.m
+          ls -la
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FullScreenBackTweak.dylib
+          path: FullScreenBackTweak.dylib
