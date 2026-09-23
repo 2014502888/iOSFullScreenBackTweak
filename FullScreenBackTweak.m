@@ -47,7 +47,7 @@ static FBSGestureDelegate *sharedDelegate = nil;
 static void FBSInstallOnNav(UINavigationController *nav) {
     @try {
         for (UIGestureRecognizer *g in nav.view.gestureRecognizers) {
-            if ([g isMemberOfClass:[UIPanGestureRecognizer class] && g.delegate == sharedDelegate]) return;
+            if ([g isMemberOfClass:[UIPanGestureRecognizer class]] && g.delegate == sharedDelegate) return;
         }
         UIGestureRecognizer *sys = nav.interactivePopGestureRecognizer;
         NSArray *targets = [sys valueForKey:@"_targets"];
