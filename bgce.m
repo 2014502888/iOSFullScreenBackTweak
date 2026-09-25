@@ -62,6 +62,8 @@ static void WXShowSettings(void) {
 
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
+        Class cls = NSClassFromString(@"VoipView");
+        if (!cls) cls = NSClassFromString(@"MMVoipViewController");
         for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
             if (![s isKindOfClass:[UIWindowScene class]]) continue;
             for (UIWindow *w in s.windows) {
