@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
+#import <AVFoundation/AVFoundation.h>
 
 // ==================== 设置存储 ====================
 static NSString *kWXKeyBeauty = @"wx_beauty";
@@ -115,9 +116,7 @@ static void WXMirror_Hook(void) {
         if (!WXGet(kWXKeyMirror)) return;
         @try {
             for (UIView *sv in [(UIView *)self subviews]) {
-                if ([sv isKindOfClass:NSClassFromString(@"MTLLayer")] || sv.layer) {
-                    sv.transform = CGAffineTransformMakeScale(-1.0, 1.0);
-                }
+                sv.transform = CGAffineTransformMakeScale(-1.0, 1.0);
             }
         } @catch (__unused NSException *e) {}
     };
@@ -134,17 +133,9 @@ static void WXMuteRingtone_Hook(void) {
     if (!m) return;
     __block IMP origImp = method_getImplementation(m);
     void (^block)(id) = ^(id self) {
-        if (!WXGet(kWXKeyMuteRingtone)) {
-            ((void(*)(id, SEL))origImp)(self, sel);
-            return;
-        }
-        NSString *url = [(AVAudioPlayer *)self valueForKey:@"url"];
-        if (url && ([url containsString:@"ring"] || [url containsString:@"Ring"] || [url containsString:@"call"])) {
-            ((void(*)(id, SEL))origImp)(self, sel);
-            [(AVAudioPlayer *)self setVolume:0.0];
-        } else {
-            ((void(*)(id, SEL))origImp)(self, sel);
-        }
+        ((void(*)(id, SEL))origImp)(self, sel);
+        if (!WXGet(kWXKeyMuteRingtone)) return;
+        @try { [self setValue:@0.0 forKey:@"volume"]; } @catch (__unused NSException *e) {}
     };
     IMP newImp = imp_implementationWithBlock(block);
     method_setImplementation(m, newImp);
