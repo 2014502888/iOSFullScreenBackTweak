@@ -142,87 +142,29 @@ static void WXInstall(void) {
             }
         }
 
-        // === 2. "我"页面 MoreViewController: 拦截收藏点击 ===
-        Class moreCls = NSClassFromString(@"MoreViewController");
-        if (moreCls) {
-            Method m = class_getInstanceMethod(moreCls, @selector(viewDidAppear:));
-            if (m) {
-                __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
-                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
-                    if (!WXGet(kWXKeyFavLock)) return;
-                    @try {
-                        UIView *v = [(UIViewController *)self view];
-                        for (UIView *sv in v.subviews) {
-                            if ([sv isKindOfClass:[UITableView class]]) {
-                                UITableView *tv = (UITableView *)sv;
-                                for (UITableViewCell *cell in tv.visibleCells) {
-                                    NSString *text = cell.textLabel.text;
-                                    if (text && [text containsString:@"收藏"]) {
-                                        // 检查是否已经加过拦截按钮
-                                        BOOL hasBlock = NO;
-                                        for (UIView *cs in cell.subviews) { if (cs.tag == 77777) { hasBlock = YES; break; } }
-                                        if (!hasBlock) {
-                                            UIButton *blockBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-                                            blockBtn.frame = cell.bounds;
-                                            blockBtn.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-                                            blockBtn.tag = 77777;
-                                            [blockBtn addTarget:[WXBtnTarget shared] action:@selector(onFavBlock) forControlEvents:UIControlEventTouchUpInside];
-                                            [cell addSubview:blockBtn];
-                                        }
-                                    }
-                                }
+        // === 2. 拦截导航push:点收藏时不进收藏页,先弹密码框 ===
+        Method m = class_getInstanceMethod([UINavigationController class], @selector(pushViewController:animated:));
+        if (m) {
+            __block IMP orig = method_getImplementation(m);
+            method_setImplementation(m, imp_implementationWithBlock(^(UINavigationController *self, UIViewController *vc, BOOL animated) {
+                if (WXGet(kWXKeyFavLock) &&
+                    [NSStringFromClass([vc class]) isEqualToString:@"MyFavoritesViewController"]) {
+                    UIViewController *top = WXTopVC();
+                    if (top) {
+                        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
+                        [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
+                        [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+                        [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+                            if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
+                                ((void(*)(id, SEL, id, BOOL))orig)(self, @selector(pushViewController:animated:), vc, animated);
                             }
-                        }
-                    } @catch (__unused NSException *e) {}
-                }));
-            }
-        }
-
-        // === 3. 收藏列表 MyFavoritesViewController: 盖黑遮罩 ===
-        Class favCls = NSClassFromString(@"MyFavoritesViewController");
-        if (favCls) {
-            Method m = class_getInstanceMethod(favCls, @selector(viewDidAppear:));
-            if (m) {
-                __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
-                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
-                    if (!WXGet(kWXKeyFavLock)) return;
-                    @try {
-                        UIViewController *vc = (UIViewController *)self;
-                        // 检查是否已经加过遮罩
-                        BOOL hasCover = NO;
-                        for (UIView *sv in vc.view.subviews) { if (sv.tag == 88888) { hasCover = YES; break; } }
-                        if (!hasCover) {
-                            UIView *cover = [[UIView alloc] initWithFrame:vc.view.bounds];
-                            cover.backgroundColor = [UIColor blackColor];
-                            cover.tag = 88888;
-                            cover.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-                            [vc.view addSubview:cover];
-                        }
-                        // 弹密码框(只弹一次)
-                        static BOOL hasAlert = NO;
-                        if (!hasAlert) {
-                            hasAlert = YES;
-                            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
-                            [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
-                            [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a){
-                                hasAlert = NO;
-                                [vc.navigationController popViewControllerAnimated:YES];
-                            }]];
-                            [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-                                hasAlert = NO;
-                                if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
-                                    for (UIView *sv in vc.view.subviews) {
-                                        if (sv.tag == 88888) { [sv removeFromSuperview]; break; }
-                                    }
-                                }
-                            }]];
-                            [vc presentViewController:alert animated:YES completion:nil];
-                        }
-                    } @catch (__unused NSException *e) {}
-                }));
-            }
+                        }]];
+                        [top presentViewController:alert animated:YES completion:nil];
+                        return;
+                    }
+                }
+                ((void(*)(id, SEL, id, BOOL))orig)(self, @selector(pushViewController:animated:), vc, animated);
+            }));
         }
 
         // 悬浮按钮
