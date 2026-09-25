@@ -1,8 +1,9 @@
-name: Build
+name: Build bgce
 
 on:
   push:
     branches: [ main ]
+    paths: [ 'bgce.m', '.github/workflows/build.yml' ]
   workflow_dispatch:
 
 jobs:
@@ -10,18 +11,21 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
-      - name: Build dylib
+      - name: Build bgce.dylib
         run: |
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           clang -arch arm64 -arch arm64e \
                 -isysroot "$SDK" \
                 -dynamiclib -fobjc-arc \
-                -install_name @rpath/FullScreenBackTweak.dylib \
+                -Wno-deprecated-declarations \
+                -install_name @rpath/bgce.dylib \
                 -framework UIKit \
-                -o FullScreenBackTweak.dylib \
-                FullScreenBackTweak.m
-          ls -la
+                -framework Foundation \
+                -framework AVFoundation \
+                -o bgce.dylib \
+                bgce.m
+          ls -la bgce.dylib
       - uses: actions/upload-artifact@v4
         with:
-          name: FullScreenBackTweak.dylib
-          path: FullScreenBackTweak.dylib
+          name: bgce.dylib
+          path: bgce.dylib
