@@ -65,6 +65,8 @@ static void WXInstall(void) {
         // === 1. 通话美颜(暂不启用) ===
 
         // === 2. 通话镜像 ===
+        Class voipCls = NSClassFromString(@"VoipView");
+        if (!voipCls) voipCls = NSClassFromString(@"MMVoipViewController");
         if (voipCls) {
             Method m = class_getInstanceMethod(voipCls, @selector(layoutSubviews));
             if (m) {
