@@ -62,6 +62,7 @@ static void WXShowSettings(void) {
 @interface WXBtnTarget : NSObject
 + (instancetype)shared;
 - (void)onBtn;
+- (void)onFavBtn:(UIViewController *)vc;
 @end
 @implementation WXBtnTarget
 + (instancetype)shared {
@@ -71,9 +72,27 @@ static void WXShowSettings(void) {
     return s;
 }
 - (void)onBtn { WXShowSettings(); }
+- (void)onFavBtn:(UIViewController *)vc {
+    // 弹密码框
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏上锁" message:@"请输入密码" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"密码";
+        tf.secureTextEntry = YES;
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        UITextField *tf = alert.textFields.firstObject;
+        if ([tf.text isEqualToString:@"1234"]) {
+            // 密码正确,打开收藏页
+            if ([vc respondsToSelector:@selector(onOpenMyFavoritesListController)]) {
+                ((void(*)(id, SEL))objc_msgSend)(vc, @selector(onOpenMyFavoritesListController));
+            }
+        }
+    }]];
+    [vc presentViewController:alert animated:YES completion:nil];
+}
 @end
 
-// 递归找包含指定文字的label
 static UILabel *WXFindLabel(UIView *v, NSString *text) {
     if ([v isKindOfClass:[UILabel class]]) {
         UILabel *lb = (UILabel *)v;
@@ -118,7 +137,7 @@ static void WXInstall(void) {
             }
         }
 
-        // 收藏上锁: 找到"收藏"label,隐藏它的cell
+        // 收藏上锁: 在收藏cell上盖透明按钮
         Class moreCls = NSClassFromString(@"MoreViewController");
         if (moreCls) {
             Method m = class_getInstanceMethod(moreCls, @selector(viewDidAppear:));
@@ -133,12 +152,25 @@ static void WXInstall(void) {
                             UILabel *favLabel = WXFindLabel(rootView, @"收藏");
                             if (favLabel) {
                                 // 向上找cell
-                                UIView *v = favLabel;
-                                while (v && ![v isKindOfClass:[UITableViewCell class]]) {
-                                    v = v.superview;
+                                UIView *cell = favLabel;
+                                while (cell && ![cell isKindOfClass:[UITableViewCell class]]) {
+                                    cell = cell.superview;
                                 }
-                                if (v) {
-                                    v.hidden = YES;
+                                if (cell) {
+                                    // 检查是否已经加过按钮
+                                    BOOL hasBtn = NO;
+                                    for (UIView *sv in cell.subviews) {
+                                        if (sv.tag == 88888) { hasBtn = YES; break; }
+                                    }
+                                    if (!hasBtn) {
+                                        UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
+                                        btn.frame = cell.bounds;
+                                        btn.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+                                        btn.tag = 88888;
+                                        [btn addTarget:[WXBtnTarget shared] action:@selector(onFavBtn:) forControlEvents:UIControlEventTouchUpInside];
+                                        [cell addSubview:btn];
+                                        objc_setAssociatedObject(btn, "vc", self, OBJC_ASSOCIATION_ASSIGN);
+                                    }
                                 }
                             }
                         } @catch (__unused NSException *e) {}
