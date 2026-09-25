@@ -14,7 +14,7 @@ jobs:
       - name: Build bgce.dylib
         run: |
           SDK=$(xcrun --sdk iphoneos --show-sdk-path)
-          clang -arch arm64 -arch arm64e \
+          clang -arch arm64 \
                 -isysroot "$SDK" \
                 -dynamiclib -fobjc-arc \
                 -Wno-deprecated-declarations \
