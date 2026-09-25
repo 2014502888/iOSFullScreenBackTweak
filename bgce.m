@@ -104,38 +104,6 @@ static void WXInstall(void) {
                 }));
             }
         }
-
-        // 调试: hook MoreViewController的viewDidAppear,列出所有label文字
-        Class moreCls = NSClassFromString(@"MoreViewController");
-        if (moreCls) {
-            Method m = class_getInstanceMethod(moreCls, @selector(viewDidAppear:));
-            if (m) {
-                __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
-                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                        @try {
-                            UIView *rootView = [(UIViewController *)self view];
-                            NSMutableArray *texts = [NSMutableArray array];
-                            void (^findLabels)(UIView *) = ^(UIView *v) {
-                                if ([v isKindOfClass:[UILabel class]]) {
-                                    UILabel *lb = (UILabel *)v;
-                                    if (lb.text && lb.text.length > 0) [texts addObject:lb.text];
-                                }
-                                for (UIView *sv in v.subviews) findLabels(sv);
-                            };
-                            findLabels(rootView);
-                            NSString *msg = [texts componentsJoinedByString:@"\n"];
-                            UIViewController *vc = (UIViewController *)self;
-                            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"我页面文字" message:msg preferredStyle:UIAlertControllerStyleAlert];
-                            [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-                            [vc presentViewController:alert animated:YES completion:nil];
-                        } @catch (__unused NSException *e) {}
-                    });
-                }));
-            }
-        }
-
         for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
             if (![s isKindOfClass:[UIWindowScene class]]) continue;
             for (UIWindow *w in s.windows) {
