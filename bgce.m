@@ -8,7 +8,7 @@ static NSString *kWXKeyMirror  = @"wx_mirror";
 static NSString *kWXKeyMuteRingtone = @"wx_mute_ring";
 static NSString *kWXKeyFavLock = @"wx_fav_lock";
 
-static UIViewController *gMoreVC = nil;
+static BOOL gFavUnlocked = NO;
 
 static BOOL WXGet(NSString *key) {
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
@@ -42,38 +42,6 @@ static UIViewController *WXTopVC(void) {
     return vc;
 }
 
-static UILabel *WXFindLabel(UIView *v, NSString *text) {
-    if ([v isKindOfClass:[UILabel class]]) {
-        UILabel *lb = (UILabel *)v;
-        if (lb.text && [lb.text isEqualToString:text]) return lb;
-    }
-    for (UIView *sv in v.subviews) {
-        UILabel *lb = WXFindLabel(sv, text);
-        if (lb) return lb;
-    }
-    return nil;
-}
-
-static void WXShowPasswordAlert(void) {
-    UIViewController *top = WXTopVC();
-    if (!top) return;
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏上锁" message:@"请输入密码" preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-        tf.placeholder = @"密码";
-        tf.secureTextEntry = YES;
-    }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-        UITextField *tf = alert.textFields.firstObject;
-        if ([tf.text isEqualToString:@"1234"]) {
-            if (gMoreVC && [gMoreVC respondsToSelector:@selector(showFavoriteView)]) {
-                ((void(*)(id, SEL))objc_msgSend)(gMoreVC, @selector(showFavoriteView));
-            }
-        }
-    }]];
-    [top presentViewController:alert animated:YES completion:nil];
-}
-
 static void WXShowSettings(void) {
     UIViewController *top = WXTopVC();
     if (!top) return;
@@ -93,7 +61,6 @@ static void WXShowSettings(void) {
 @interface WXBtnTarget : NSObject
 + (instancetype)shared;
 - (void)onBtn;
-- (void)onFavBtn;
 @end
 @implementation WXBtnTarget
 + (instancetype)shared {
@@ -103,35 +70,7 @@ static void WXShowSettings(void) {
     return s;
 }
 - (void)onBtn { WXShowSettings(); }
-- (void)onFavBtn { WXShowPasswordAlert(); }
 @end
-
-static void WXInstallFavLock(UIView *rootView) {
-    @try {
-        UILabel *favLabel = WXFindLabel(rootView, @"收藏");
-        if (favLabel) {
-            UIView *cell = favLabel;
-            while (cell && ![cell isKindOfClass:[UITableViewCell class]]) {
-                cell = cell.superview;
-            }
-            if (cell) {
-                BOOL hasBtn = NO;
-                for (UIView *sv in cell.subviews) {
-                    if (sv.tag == 88888) { hasBtn = YES; break; }
-                }
-                if (!hasBtn) {
-                    UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
-                    btn.frame = cell.bounds;
-                    btn.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-                    btn.tag = 88888;
-                    [btn addTarget:[WXBtnTarget shared] action:@selector(onFavBtn) forControlEvents:UIControlEventTouchUpInside];
-                    [cell addSubview:btn];
-                    [cell bringSubviewToFront:btn];
-                }
-            }
-        }
-    } @catch (__unused NSException *e) {}
-}
 
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -165,21 +104,32 @@ static void WXInstall(void) {
             }
         }
 
+        // 收藏上锁: hook showFavoriteView方法
         Class moreCls = NSClassFromString(@"MoreViewController");
         if (moreCls) {
-            Method m = class_getInstanceMethod(moreCls, @selector(viewDidAppear:));
+            Method m = class_getInstanceMethod(moreCls, @selector(showFavoriteView));
             if (m) {
                 __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
-                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
-                    gMoreVC = (UIViewController *)self;
-                    if (!WXGet(kWXKeyFavLock)) return;
-                    // 延迟1秒,多次尝试
-                    for (int i = 1; i <= 3; i++) {
-                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                            UIView *rootView = [(UIViewController *)self view];
-                            WXInstallFavLock(rootView);
-                        });
+                method_setImplementation(m, imp_implementationWithBlock(^(id self) {
+                    // 如果上锁且没解锁,弹密码框
+                    if (WXGet(kWXKeyFavLock) && !gFavUnlocked) {
+                        UIViewController *vc = (UIViewController *)self;
+                        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏上锁" message:@"请输入密码" preferredStyle:UIAlertControllerStyleAlert];
+                        [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+                            tf.placeholder = @"密码";
+                            tf.secureTextEntry = YES;
+                        }];
+                        [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+                        [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+                            UITextField *tf = alert.textFields.firstObject;
+                            if ([tf.text isEqualToString:@"1234"]) {
+                                gFavUnlocked = YES;
+                                ((void(*)(id, SEL))orig)(self, @selector(showFavoriteView));
+                            }
+                        }]];
+                        [vc presentViewController:alert animated:YES completion:nil];
+                    } else {
+                        ((void(*)(id, SEL))orig)(self, @selector(showFavoriteView));
                     }
                 }));
             }
