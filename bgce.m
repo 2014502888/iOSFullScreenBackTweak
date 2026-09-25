@@ -104,15 +104,16 @@ static void WXInstall(void) {
             }
         }
 
-        // 收藏上锁: hook showFavoriteView方法
-        Class moreCls = NSClassFromString(@"MoreViewController");
-        if (moreCls) {
-            Method m = class_getInstanceMethod(moreCls, @selector(showFavoriteView));
+        // 收藏上锁: hook MMUIViewController的showFavoriteView
+        Class mmCls = NSClassFromString(@"MMUIViewController");
+        if (mmCls) {
+            Method m = class_getInstanceMethod(mmCls, @selector(showFavoriteView));
             if (m) {
                 __block IMP orig = method_getImplementation(m);
                 method_setImplementation(m, imp_implementationWithBlock(^(id self) {
-                    // 如果上锁且没解锁,弹密码框
-                    if (WXGet(kWXKeyFavLock) && !gFavUnlocked) {
+                    // 只在"我"页面拦截
+                    NSString *clsName = NSStringFromClass([self class]);
+                    if ([clsName isEqualToString:@"MoreViewController"] && WXGet(kWXKeyFavLock) && !gFavUnlocked) {
                         UIViewController *vc = (UIViewController *)self;
                         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏上锁" message:@"请输入密码" preferredStyle:UIAlertControllerStyleAlert];
                         [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
