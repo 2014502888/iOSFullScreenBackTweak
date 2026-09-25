@@ -54,12 +54,32 @@ static void WXShowSettings(void) {
     [ac addAction:[UIAlertAction actionWithTitle:fl ? @"✓ 收藏上锁: 开" : @"  收藏上锁: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyFavLock, !fl); }]];
     BOOL qe = WXGet(kWXKeyQuickEdit);
     [ac addAction:[UIAlertAction actionWithTitle:qe ? @"✓ 快捷发送编辑: 开" : @"  快捷发送编辑: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyQuickEdit, !qe); }]];
-    // 调试:显示当前页面类名
-    [ac addAction:[UIAlertAction actionWithTitle:@"调试: 当前页面类名" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+    // 调试:扫描所有类,找实现了关键方法的类名
+    [ac addAction:[UIAlertAction actionWithTitle:@"调试: 扫描Hook类名" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        NSMutableString *result = [NSMutableString string];
+        unsigned int total = 0;
+        Class *classes = objc_copyClassList(&total);
+        NSArray *sels = @[@"openVideoWindowWithContact:msgWrap:isCaller:from:",
+                          @"openAudioWindowWithContact:msgWrap:isCaller:from:",
+                          @"onOpenMyFavoritesListController",
+                          @"didFinishPickingImageWithEditImageAttr:"];
+        for (NSString *selName in sels) {
+            [result appendFormat:@"【%@】\n", selName];
+            BOOL found = NO;
+            SEL sel = NSSelectorFromString(selName);
+            for (unsigned int i = 0; i < total; i++) {
+                if (class_getInstanceMethod(classes[i], sel)) {
+                    [result appendFormat:@"  %@\n", NSStringFromClass(classes[i])];
+                    found = YES;
+                }
+            }
+            if (!found) [result appendFormat:@"  (未找到)\n"];
+            [result appendString:@"\n"];
+        }
+        free(classes);
         UIViewController *t = WXTopVC();
-        NSString *msg = t ? [NSString stringWithFormat:@"当前: %@\n父类: %@", NSStringFromClass([t class]), NSStringFromClass([[t class] superclass])] : @"无topVC";
-        UIAlertController *dbg = [UIAlertController alertControllerWithTitle:@"调试" message:msg preferredStyle:UIAlertControllerStyleAlert];
-        [dbg addAction:[UIAlertAction actionWithTitle:@"复制" style:UIAlertActionStyleDefault handler:nil]];
+        UIAlertController *dbg = [UIAlertController alertControllerWithTitle:@"扫描结果" message:result preferredStyle:UIAlertControllerStyleAlert];
+        [dbg addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleDefault handler:nil]];
         [t presentViewController:dbg animated:YES completion:nil];
     }]];
     [ac addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
