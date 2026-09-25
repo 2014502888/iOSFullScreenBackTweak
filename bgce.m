@@ -80,18 +80,16 @@ static void WXShowSettings(void) {
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
-            // 密码对了,移除所有拦截按钮,模拟点击
             UIView *v = top.view;
-            for (UIView *sv in v.subviews) {
-                if ([sv isKindOfClass:[UITableView class]]) {
-                    UITableView *tv = (UITableView *)sv;
-                    for (UITableViewCell *cell in tv.visibleCells) {
-                        for (UIView *cs in cell.subviews) {
-                            if ([cs isKindOfClass:[UIButton class]] && cs.tag == 77777) {
-                                [cs removeFromSuperview];
-                            }
-                        }
-                    }
+            NSMutableArray *cells = [NSMutableArray array];
+            void (^findCells)(UIView *) = ^(UIView *vv) {
+                if ([vv isKindOfClass:[UITableViewCell class]]) [cells addObject:vv];
+                for (UIView *sv in vv.subviews) findCells(sv);
+            };
+            findCells(v);
+            for (UITableViewCell *cell in cells) {
+                for (UIView *sv in cell.subviews) {
+                    if (sv.tag == 77777) { [sv removeFromSuperview]; }
                 }
             }
         }
@@ -102,8 +100,6 @@ static void WXShowSettings(void) {
 
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-
-        // === 1. 通话页面 VoIPCallerViewController ===
         Class voipCls = NSClassFromString(@"VoIPCallerViewController");
         if (voipCls) {
             Method m = class_getInstanceMethod(voipCls, @selector(viewDidAppear:));
@@ -141,16 +137,50 @@ static void WXInstall(void) {
                 }));
             }
         }
-
-        // === 2. 拦截收藏:hook onOpenMyFavoritesListController + tableView选中 ===
-        Class baseCls = NSClassFromString(@"MMUIViewController");
-        if (baseCls) {
-            // 方法A: hook onOpenMyFavoritesListController
-            SEL sel = NSSelectorFromString(@"onOpenMyFavoritesListController");
-            Method m = class_getInstanceMethod(baseCls, sel);
+        Class moreCls = NSClassFromString(@"MoreViewController");
+        if (moreCls) {
+            Method m = class_getInstanceMethod(moreCls, @selector(viewDidAppear:));
             if (m) {
                 __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self) {
+                method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
+                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
+                    if (!WXGet(kWXKeyFavLock)) return;
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        @try {
+                            UIView *rootView = [(UIViewController *)self view];
+                            NSMutableArray *labels = [NSMutableArray array];
+                            void (^findLabels)(UIView *) = ^(UIView *v) {
+                                if ([v isKindOfClass:[UILabel class]]) [labels addObject:v];
+                                for (UIView *sv in v.subviews) findLabels(sv);
+                            };
+                            findLabels(rootView);
+                            for (UILabel *lb in labels) {
+                                if (lb.text && [lb.text containsString:@"收藏"]) {
+                                    UIView *cell = lb.superview;
+                                    while (cell && ![cell isKindOfClass:[UITableViewCell class]]) cell = cell.superview;
+                                    if (cell) {
+                                        BOOL hasBlock = NO;
+                                        for (UIView *sv in cell.subviews) { if (sv.tag == 77777) { hasBlock = YES; break; } }
+                                        if (!hasBlock) {
+                                            UIButton *blockBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+                                            blockBtn.frame = cell.bounds;
+                                            blockBtn.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+                                            blockBtn.tag = 77777;
+                                            [blockBtn addTarget:[WXBtnTarget shared] action:@selector(onFavBlock) forControlEvents:UIControlEventTouchUpInside];
+                                            [cell addSubview:blockBtn];
+                                        }
+                                    }
+                                }
+                            }
+                        } @catch (__unused NSException *e) {}
+                    });
+                }));
+            }
+            SEL sel = NSSelectorFromString(@"onOpenMyFavoritesListController");
+            Method m2 = class_getInstanceMethod(moreCls, sel);
+            if (m2) {
+                __block IMP orig2 = method_getImplementation(m2);
+                method_setImplementation(m2, imp_implementationWithBlock(^(id self) {
                     if (WXGet(kWXKeyFavLock)) {
                         UIViewController *top = WXTopVC();
                         if (top) {
@@ -159,56 +189,24 @@ static void WXInstall(void) {
                             [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
                             [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
                                 if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
-                                    ((void(*)(id, SEL))orig)(self, sel);
+                                    ((void(*)(id, SEL))orig2)(self, sel);
                                 }
                             }]];
                             [top presentViewController:alert animated:YES completion:nil];
                             return;
                         }
                     }
-                    ((void(*)(id, SEL))orig)(self, sel);
-                }));
-            }
-            // 方法B: hook tableView:didSelectRowAtIndexPath:
-            SEL sel2 = @selector(tableView:didSelectRowAtIndexPath:);
-            Method m2 = class_getInstanceMethod(baseCls, sel2);
-            if (m2) {
-                __block IMP orig2 = method_getImplementation(m2);
-                method_setImplementation(m2, imp_implementationWithBlock(^(id self, UITableView *tv, NSIndexPath *ip) {
-                    if (WXGet(kWXKeyFavLock) &&
-                        [NSStringFromClass([self class]) isEqualToString:@"MoreViewController"]) {
-                        UITableViewCell *cell = [tv cellForRowAtIndexPath:ip];
-                        NSString *text = cell.textLabel.text;
-                        if (text && [text containsString:@"收藏"]) {
-                            UIViewController *top = WXTopVC();
-                            if (top) {
-                                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
-                                [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
-                                [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-                                [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-                                    if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
-                                        ((void(*)(id, SEL, id, id))orig2)(self, sel2, tv, ip);
-                                    }
-                                }]];
-                                [top presentViewController:alert animated:YES completion:nil];
-                                return;
-                            }
-                        }
-                    }
-                    ((void(*)(id, SEL, id, id))orig2)(self, sel2, tv, ip);
+                    ((void(*)(id, SEL))orig2)(self, sel);
                 }));
             }
         }
-
-        // 悬浮按钮
         for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
             if (![s isKindOfClass:[UIWindowScene class]]) continue;
             for (UIWindow *w in s.windows) {
                 static dispatch_once_t once;
                 dispatch_once(&once, ^{
                     UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
-                    btn.frame = CGRectMake([UIScreen mainScreen].bounds.size.width - 60,
-                                           [UIScreen mainScreen].bounds.size.height - 220, 44, 44);
+                    btn.frame = CGRectMake([UIScreen mainScreen].bounds.size.width - 60, [UIScreen mainScreen].bounds.size.height - 220, 44, 44);
                     btn.layer.cornerRadius = 22;
                     btn.backgroundColor = [UIColor colorWithRed:0.2 green:0.5 blue:1.0 alpha:0.85];
                     [btn setTitle:@"微" forState:UIControlStateNormal];
@@ -223,9 +221,6 @@ static void WXInstall(void) {
 }
 
 __attribute__((constructor)) static void WXConstructor(void) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{ WXInstall(); });
-    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
-                                                      object:nil queue:nil
-                                                  usingBlock:^(NSNotification *n){ WXInstall(); }];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{ WXInstall(); });
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification object:nil queue:nil usingBlock:^(NSNotification *n){ WXInstall(); }];
 }
