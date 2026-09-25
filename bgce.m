@@ -62,18 +62,84 @@ static void WXShowSettings(void) {
 
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        Class cls = NSClassFromString(@"VoipView");
-        if (!cls) cls = NSClassFromString(@"MMVoipViewController");
-        if (cls) {
-            Method m = class_getInstanceMethod(cls, @selector(viewDidAppear:));
+        // === 1. 通话美颜 ===
+        Class voipCls = NSClassFromString(@"VoipView");
+        if (!voipCls) voipCls = NSClassFromString(@"MMVoipViewController");
+        if (voipCls) {
+            Method m = class_getInstanceMethod(voipCls, @selector(viewDidAppear:));
             if (m) {
                 __block IMP orig = method_getImplementation(m);
-                void (^block)(id, BOOL) = ^(id self, BOOL animated) {
+                method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
                     ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
-                };
-                method_setImplementation(m, imp_implementationWithBlock(block));
+                    if (!WXGet(kWXKeyBeauty)) return;
+                    @try {
+                        UIView *v = [(UIViewController *)self view];
+                        if (!v) return;
+                        for (UIView *sv in v.subviews) { if (sv.tag == 99999) return; }
+                        UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+                        b.frame = CGRectMake(16, 80, 44, 44);
+                        b.layer.cornerRadius = 22;
+                        b.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.4];
+                        [b setTitle:@"美" forState:UIControlStateNormal];
+                        [b setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+                        b.tag = 99999;
+                        [v addSubview:b];
+                    } @catch (__unused NSException *e) {}
+                }));
             }
         }
+
+        // === 2. 通话镜像 ===
+        if (voipCls) {
+            Method m = class_getInstanceMethod(voipCls, @selector(layoutSubviews));
+            if (m) {
+                __block IMP orig = method_getImplementation(m);
+                method_setImplementation(m, imp_implementationWithBlock(^(id self) {
+                    ((void(*)(id, SEL))orig)(self, @selector(layoutSubviews));
+                    if (!WXGet(kWXKeyMirror)) return;
+                    @try {
+                        for (UIView *sv in [(UIView *)self subviews]) {
+                            sv.transform = CGAffineTransformMakeScale(-1.0, 1.0);
+                        }
+                    } @catch (__unused NSException *e) {}
+                }));
+            }
+        }
+
+        // === 3. 来电静音铃声 ===
+        Class audioCls = NSClassFromString(@"AVAudioPlayer");
+        if (audioCls) {
+            Method m = class_getInstanceMethod(audioCls, @selector(play));
+            if (m) {
+                __block IMP orig = method_getImplementation(m);
+                method_setImplementation(m, imp_implementationWithBlock(^(id self) {
+                    ((void(*)(id, SEL))orig)(self, @selector(play));
+                    if (!WXGet(kWXKeyMuteRingtone)) return;
+                    @try { [self setValue:@0.0 forKey:@"volume"]; } @catch (__unused NSException *e) {}
+                }));
+            }
+        }
+
+        // === 4. 收藏上锁 ===
+        Class meCls = NSClassFromString(@"MMSystemSettingViewController");
+        if (!meCls) meCls = NSClassFromString(@"WCTMainPageViewController");
+        if (meCls) {
+            Method m = class_getInstanceMethod(meCls, @selector(tableView:cellForRowAtIndexPath:));
+            if (m) {
+                __block IMP orig = method_getImplementation(m);
+                method_setImplementation(m, imp_implementationWithBlock(^UITableViewCell *(id self, UITableView *tv, NSIndexPath *ip) {
+                    UITableViewCell *cell = ((UITableViewCell *(*)(id, SEL, UITableView *, NSIndexPath *))orig)(self, @selector(tableView:cellForRowAtIndexPath:), tv, ip);
+                    if (!WXGet(kWXKeyFavLock)) return cell;
+                    @try {
+                        NSString *t = cell.textLabel.text;
+                        if (t && [t containsString:@"收藏"]) { cell.hidden = YES; cell.alpha = 0.0; }
+                    } @catch (__unused NSException *e) {}
+                    return cell;
+                }));
+            }
+        }
+
+        // 悬浮按钮
         for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
             if (![s isKindOfClass:[UIWindowScene class]]) continue;
             for (UIWindow *w in s.windows) {
