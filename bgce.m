@@ -2,7 +2,6 @@
 #import <AVFoundation/AVFoundation.h>
 #import <objc/runtime.h>
 #import <objc/message.h>
-#import <AudioToolbox/AudioToolbox.h>
 
 static NSString *kWXKeyBeauty = @"wx_beauty";
 static NSString *kWXKeyMirror  = @"wx_mirror";
@@ -17,6 +16,14 @@ static BOOL WXGet(NSString *key) {
 }
 static void WXSet(NSString *key, BOOL val) {
     [[NSUserDefaults standardUserDefaults] setBool:val forKey:key];
+}
+
+// 记录最近访问的页面类名
+static NSMutableArray<NSString *> *WXPageHistory(void) {
+    static NSMutableArray *h;
+    static dispatch_once_t t;
+    dispatch_once(&t, ^{ h = [NSMutableArray array]; });
+    return h;
 }
 
 static UIViewController *WXTopVC(void) {
@@ -56,6 +63,16 @@ static void WXShowSettings(void) {
     [ac addAction:[UIAlertAction actionWithTitle:fl ? @"✓ 收藏上锁: 开" : @"  收藏上锁: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyFavLock, !fl); }]];
     BOOL qe = WXGet(kWXKeyQuickEdit);
     [ac addAction:[UIAlertAction actionWithTitle:qe ? @"✓ 快捷发送编辑: 开" : @"  快捷发送编辑: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyQuickEdit, !qe); }]];
+    // 调试:显示最近页面历史
+    [ac addAction:[UIAlertAction actionWithTitle:@"调试: 最近页面记录" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        NSMutableString *msg = [NSMutableString string];
+        for (NSString *s in WXPageHistory()) {
+            [msg appendFormat:@"%@\n", s];
+        }
+        UIAlertController *dbg = [UIAlertController alertControllerWithTitle:@"最近经过的页面" message:msg preferredStyle:UIAlertControllerStyleAlert];
+        [dbg addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleDefault handler:nil]];
+        [top presentViewController:dbg animated:YES completion:nil];
+    }]];
     [ac addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
     [top presentViewController:ac animated:YES completion:nil];
 }
@@ -77,7 +94,7 @@ static void WXShowSettings(void) {
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
 
-        // === 1. 收藏上锁: hook MMUIViewController基类,在"我"页面隐藏收藏cell ===
+        // hook MMUIViewController基类,记录所有页面
         Class baseCls = NSClassFromString(@"MMUIViewController");
         if (baseCls) {
             Method m = class_getInstanceMethod(baseCls, @selector(viewDidAppear:));
@@ -86,22 +103,21 @@ static void WXInstall(void) {
                 method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
                     ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
                     @try {
-                        if (!WXGet(kWXKeyFavLock)) return;
-                        UIView *v = [(UIViewController *)self view];
-                        if (!v) return;
-                        // 遍历所有subview找tableView
-                        for (UIView *sv in v.subviews) {
-                            if ([sv isKindOfClass:[UITableView class]]) {
-                                UITableView *tv = (UITableView *)sv;
-                                for (UITableViewCell *cell in tv.visibleCells) {
-                                    if ([cell.textLabel.text containsString:@"收藏"]) {
-                                        cell.hidden = YES;
-                                        cell.alpha = 0.0;
-                                        // 找下一个cell补位
-                                        NSIndexPath *ip = [tv indexPathForCell:cell];
-                                        if (ip && ip.row + 1 < [tv numberOfRowsInSection:ip.section]) {
-                                            NSIndexPath *next = [NSIndexPath indexPathForRow:ip.row+1 inSection:ip.section];
-                                            [tv insertRowsAtIndexPaths:@[next] withRowAnimation:UITableViewRowAnimationNone];
+                        NSString *clsName = NSStringFromClass([self class]);
+                        NSMutableArray *h = WXPageHistory();
+                        [h addObject:clsName];
+                        if (h.count > 30) [h removeObjectAtIndex:0];
+
+                        // 收藏上锁:隐藏收藏cell
+                        if (WXGet(kWXKeyFavLock)) {
+                            UIView *v = [(UIViewController *)self view];
+                            for (UIView *sv in v.subviews) {
+                                if ([sv isKindOfClass:[UITableView class]]) {
+                                    UITableView *tv = (UITableView *)sv;
+                                    for (UITableViewCell *cell in tv.visibleCells) {
+                                        if ([cell.textLabel.text containsString:@"收藏"]) {
+                                            cell.hidden = YES;
+                                            cell.alpha = 0.0;
                                         }
                                     }
                                 }
@@ -109,44 +125,6 @@ static void WXInstall(void) {
                         }
                     } @catch (__unused NSException *e) {}
                 }));
-            }
-        }
-
-        // === 2. 拨号静音: hook AVAudioPlayer,所有播放音量设为0 ===
-        Class audioPlayerCls = NSClassFromString(@"AVAudioPlayer");
-        if (audioPlayerCls) {
-            Method m = class_getInstanceMethod(audioPlayerCls, @selector(play));
-            if (m) {
-                __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self) {
-                    ((void(*)(id, SEL))orig)(self, @selector(play));
-                    if (WXGet(kWXKeyMuteRingtone)) {
-                        @try { [self setValue:@0.0 forKey:@"volume"]; } @catch (__unused NSException *e) {}
-                    }
-                }));
-            }
-        }
-
-        // === 3. 通话镜像: hook AVCaptureVideoPreviewLayer ===
-        Class layerCls = NSClassFromString(@"AVCaptureVideoPreviewLayer");
-        if (layerCls) {
-            Method m = class_getInstanceMethod(layerCls, @selector(setMirrored:));
-            if (m) {
-                __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL mirrored) {
-                    if (WXGet(kWXKeyMirror)) mirrored = YES;
-                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(setMirrored:), mirrored);
-                }));
-            }
-        }
-
-        // === 4. 快捷发送编辑图片: hook MMImagePickerController ===
-        Class pickerCls = NSClassFromString(@"MMImagePickerController");
-        if (pickerCls) {
-            SEL sel = NSSelectorFromString(@"didFinishPickingImageWithEditImageAttr:");
-            Method m = class_getInstanceMethod(pickerCls, sel);
-            if (m) {
-                // 这个方法存在,等后续实现编辑器
             }
         }
 
@@ -173,7 +151,7 @@ static void WXInstall(void) {
 }
 
 __attribute__((constructor)) static void WXConstructor(void) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ WXInstall(); });
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
                                                       object:nil queue:nil
