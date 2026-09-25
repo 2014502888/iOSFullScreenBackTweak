@@ -2,6 +2,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 
+// ==================== 设置存储 ====================
 static NSString *kWXKeyBeauty = @"wx_beauty";
 static NSString *kWXKeyMirror  = @"wx_mirror";
 static NSString *kWXKeyMuteRingtone = @"wx_mute_ring";
@@ -60,12 +61,33 @@ static void WXShowSettings(void) {
 - (void)onBtn { WXShowSettings(); }
 @end
 
-// ==================== 1. 通话美颜 ====================
-static void WXBeauty_Hook(void) {
-    Class voipCls = NSClassFromString(@"VoipView");
-    if (!voipCls) return;
-}
-
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        WXBeauty_Hook();
+        for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
+            if (![s isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow *w in s.windows) {
+                static dispatch_once_t once;
+                dispatch_once(&once, ^{
+                    UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+                    btn.frame = CGRectMake([UIScreen mainScreen].bounds.size.width - 60,
+                                           [UIScreen mainScreen].bounds.size.height - 220, 44, 44);
+                    btn.layer.cornerRadius = 22;
+                    btn.backgroundColor = [UIColor colorWithRed:0.2 green:0.5 blue:1.0 alpha:0.85];
+                    [btn setTitle:@"微" forState:UIControlStateNormal];
+                    [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+                    btn.titleLabel.font = [UIFont boldSystemFontOfSize:16];
+                    [btn addTarget:[WXBtnTarget shared] action:@selector(onBtn) forControlEvents:UIControlEventTouchUpInside];
+                    [w addSubview:btn];
+                });
+            }
+        }
+    });
+}
+
+__attribute__((constructor)) static void WXConstructor(void) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{ WXInstall(); });
+    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
+                                                      object:nil queue:nil
+                                                  usingBlock:^(NSNotification *n){ WXInstall(); }];
+}
