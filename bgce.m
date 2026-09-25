@@ -73,12 +73,8 @@ static void WXShowSettings(void) {
 - (void)onBtn { WXShowSettings(); }
 @end
 
-// 全局保存原始的tableView:didSelectRowAtIndexPath:实现
-static IMP origTableViewDidSelect = NULL;
-
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        // 1. 通话页面
         Class voipCls = NSClassFromString(@"VoIPCallerViewController");
         if (voipCls) {
             Method m = class_getInstanceMethod(voipCls, @selector(viewDidAppear:));
@@ -116,58 +112,37 @@ static void WXInstall(void) {
                 }));
             }
         }
-
-        // 2. hook UITableView的setDelegate:,当delegate被设置后,再hook delegate的选中方法
-        Class tvCls = [UITableView class];
-        Method m = class_getInstanceMethod(tvCls, @selector(setDelegate:));
-        if (m) {
-            __block IMP orig = method_getImplementation(m);
-            method_setImplementation(m, imp_implementationWithBlock(^(UITableView *self, id delegate) {
-                ((void(*)(id, SEL, id))orig)(self, @selector(setDelegate:), delegate);
-                if (delegate && !origTableViewDidSelect) {
-                    SEL sel = @selector(tableView:didSelectRowAtIndexPath:);
-                    Method dm = class_getInstanceMethod([delegate class], sel);
-                    if (dm) {
-                        origTableViewDidSelect = method_getImplementation(dm);
-                        method_setImplementation(dm, imp_implementationWithBlock(^(id delegateSelf, UITableView *tv, NSIndexPath *ip) {
-                            if (WXGet(kWXKeyFavLock) &&
-                                [NSStringFromClass([delegateSelf class]) isEqualToString:@"MoreViewController"]) {
-                                UITableViewCell *cell = [tv cellForRowAtIndexPath:ip];
-                                // 递归找cell里的所有label
-                                NSString *text = nil;
-                                NSMutableArray *labels = [NSMutableArray array];
-                                void (^findLabels)(UIView *) = ^(UIView *v) {
-                                    if ([v isKindOfClass:[UILabel class]]) [labels addObject:v];
-                                    for (UIView *sv in v.subviews) findLabels(sv);
-                                };
-                                findLabels(cell);
-                                for (UILabel *lb in labels) {
-                                    if (lb.text && [lb.text containsString:@"收藏"]) text = lb.text;
+        SEL favSel = NSSelectorFromString(@"onOpenMyFavoritesListController");
+        int numClasses = objc_getClassList(NULL, 0);
+        Class *classes = (Class *)malloc(sizeof(Class) * numClasses);
+        objc_getClassList(classes, numClasses);
+        for (int i = 0; i < numClasses; i++) {
+            Class cls = classes[i];
+            if (class_getInstanceMethod(cls, favSel)) {
+                Method m = class_getInstanceMethod(cls, favSel);
+                __block IMP orig = method_getImplementation(m);
+                method_setImplementation(m, imp_implementationWithBlock(^(id self) {
+                    if (WXGet(kWXKeyFavLock)) {
+                        UIViewController *top = WXTopVC();
+                        if (top) {
+                            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
+                            [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
+                            [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+                            [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+                                if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
+                                    ((void(*)(id, SEL))orig)(self, favSel);
                                 }
-                                if (text && [text containsString:@"收藏"]) {
-                                    UIViewController *top = WXTopVC();
-                                    if (top) {
-                                        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
-                                        [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
-                                        [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-                                        [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-                                            if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
-                                                ((void(*)(id, SEL, id, id))origTableViewDidSelect)(delegateSelf, sel, tv, ip);
-                                            }
-                                        }]];
-                                        [top presentViewController:alert animated:YES completion:nil];
-                                        return;
-                                    }
-                                }
-                            }
-                            ((void(*)(id, SEL, id, id))origTableViewDidSelect)(delegateSelf, sel, tv, ip);
-                        }));
+                            }]];
+                            [top presentViewController:alert animated:YES completion:nil];
+                            return;
+                        }
                     }
-                }
-            }));
+                    ((void(*)(id, SEL))orig)(self, favSel);
+                }));
+                break;
+            }
         }
-
-        // 悬浮按钮
+        free(classes);
         for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
             if (![s isKindOfClass:[UIWindowScene class]]) continue;
             for (UIWindow *w in s.windows) {
