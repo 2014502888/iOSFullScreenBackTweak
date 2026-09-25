@@ -66,18 +66,9 @@ static void WXOpenFavWithPassword(void) {
     [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         UITextField *tf = alert.textFields.firstObject;
         if ([tf.text isEqualToString:@"1234"]) {
-            // 调试: 显示gMoreVC的信息
-            NSMutableString *msg = [NSMutableString string];
-            [msg appendFormat:@"gMoreVC: %@\n", gMoreVC ? @"有" : @"无"];
-            if (gMoreVC) {
-                [msg appendFormat:@"类: %@\n", NSStringFromClass([gMoreVC class])];
-                [msg appendFormat:@"响应onOpen: %@\n", [gMoreVC respondsToSelector:@selector(onOpenMyFavoritesListController)] ? @"是" : @"否"];
-                [msg appendFormat:@"响应showFav: %@\n", [gMoreVC respondsToSelector:@selector(showFavoriteView)] ? @"是" : @"否"];
+            if (gMoreVC && [gMoreVC respondsToSelector:@selector(showFavoriteView)]) {
+                ((void(*)(id, SEL))objc_msgSend)(gMoreVC, @selector(showFavoriteView));
             }
-            UIViewController *vc = WXTopVC();
-            UIAlertController *a2 = [UIAlertController alertControllerWithTitle:@"调试" message:msg preferredStyle:UIAlertControllerStyleAlert];
-            [a2 addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-            [vc presentViewController:a2 animated:YES completion:nil];
         }
     }]];
     [top presentViewController:alert animated:YES completion:nil];
@@ -95,7 +86,7 @@ static void WXShowSettings(void) {
     [ac addAction:[UIAlertAction actionWithTitle:mu ? @"✓ 拨号静音: 开" : @"  拨号静音: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyMuteRingtone, !mu); }]];
     BOOL fl = WXGet(kWXKeyFavLock);
     [ac addAction:[UIAlertAction actionWithTitle:fl ? @"✓ 收藏上锁: 开" : @"  收藏上锁: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyFavLock, !fl); }]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"打开收藏(调试)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXOpenFavWithPassword(); }]];
+    [ac addAction:[UIAlertAction actionWithTitle:@"打开收藏(需密码)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXOpenFavWithPassword(); }]];
     [ac addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
     [top presentViewController:ac animated:YES completion:nil];
 }
