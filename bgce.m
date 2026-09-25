@@ -42,6 +42,49 @@ static UIViewController *WXTopVC(void) {
     return vc;
 }
 
+static UILabel *WXFindLabel(UIView *v, NSString *text) {
+    if ([v isKindOfClass:[UILabel class]]) {
+        UILabel *lb = (UILabel *)v;
+        if (lb.text && [lb.text isEqualToString:text]) return lb;
+    }
+    for (UIView *sv in v.subviews) {
+        UILabel *lb = WXFindLabel(sv, text);
+        if (lb) return lb;
+    }
+    return nil;
+}
+
+static void WXShowPasswordAlert(void) {
+    UIViewController *top = WXTopVC();
+    if (!top) return;
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏上锁" message:@"请输入密码" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"密码";
+        tf.secureTextEntry = YES;
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        UITextField *tf = alert.textFields.firstObject;
+        if ([tf.text isEqualToString:@"1234"]) {
+            gFavUnlocked = YES;
+            // 找MoreViewController打开收藏
+            UIViewController *vc = WXTopVC();
+            UINavigationController *nav = vc.navigationController;
+            if (nav) {
+                for (UIViewController *child in nav.viewControllers) {
+                    if ([NSStringFromClass([child class]) isEqualToString:@"MoreViewController"]) {
+                        if ([child respondsToSelector:@selector(showFavoriteView)]) {
+                            ((void(*)(id, SEL))objc_msgSend)(child, @selector(showFavoriteView));
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }]];
+    [top presentViewController:alert animated:YES completion:nil];
+}
+
 static void WXShowSettings(void) {
     UIViewController *top = WXTopVC();
     if (!top) return;
@@ -61,6 +104,7 @@ static void WXShowSettings(void) {
 @interface WXBtnTarget : NSObject
 + (instancetype)shared;
 - (void)onBtn;
+- (void)onFavBtn;
 @end
 @implementation WXBtnTarget
 + (instancetype)shared {
@@ -70,7 +114,35 @@ static void WXShowSettings(void) {
     return s;
 }
 - (void)onBtn { WXShowSettings(); }
+- (void)onFavBtn { WXShowPasswordAlert(); }
 @end
+
+static void WXAddFavBtn(UIView *rootView) {
+    @try {
+        UILabel *favLabel = WXFindLabel(rootView, @"收藏");
+        if (favLabel) {
+            UIView *cell = favLabel;
+            while (cell && ![cell isKindOfClass:[UITableViewCell class]]) {
+                cell = cell.superview;
+            }
+            if (cell) {
+                BOOL hasBtn = NO;
+                for (UIView *sv in cell.subviews) {
+                    if (sv.tag == 88888) { hasBtn = YES; break; }
+                }
+                if (!hasBtn) {
+                    UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
+                    btn.frame = cell.bounds;
+                    btn.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+                    btn.tag = 88888;
+                    [btn addTarget:[WXBtnTarget shared] action:@selector(onFavBtn) forControlEvents:UIControlEventTouchUpInside];
+                    [cell addSubview:btn];
+                    [cell bringSubviewToFront:btn];
+                }
+            }
+        }
+    } @catch (__unused NSException *e) {}
+}
 
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -104,34 +176,21 @@ static void WXInstall(void) {
             }
         }
 
-        // 收藏上锁: hook showFavoriteViewB: 方法
-        Class mmCls = NSClassFromString(@"MMUIViewController");
-        if (mmCls) {
-            // 先试showFavoriteViewB:
-            SEL selB = @selector(showFavoriteViewB:);
-            Method mB = class_getInstanceMethod(mmCls, selB);
-            if (mB) {
-                __block IMP origB = method_getImplementation(mB);
-                method_setImplementation(mB, imp_implementationWithBlock(^(id self, id arg) {
-                    NSString *clsName = NSStringFromClass([self class]);
-                    if ([clsName isEqualToString:@"MoreViewController"] && WXGet(kWXKeyFavLock) && !gFavUnlocked) {
-                        UIViewController *vc = (UIViewController *)self;
-                        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏上锁" message:@"请输入密码" preferredStyle:UIAlertControllerStyleAlert];
-                        [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-                            tf.placeholder = @"密码";
-                            tf.secureTextEntry = YES;
-                        }];
-                        [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-                        [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-                            UITextField *tf = alert.textFields.firstObject;
-                            if ([tf.text isEqualToString:@"1234"]) {
-                                gFavUnlocked = YES;
-                                ((void(*)(id, SEL, id))origB)(self, selB, arg);
-                            }
-                        }]];
-                        [vc presentViewController:alert animated:YES completion:nil];
-                    } else {
-                        ((void(*)(id, SEL, id))origB)(self, selB, arg);
+        // 收藏上锁: hook MoreViewController的viewDidAppear
+        Class moreCls = NSClassFromString(@"MoreViewController");
+        if (moreCls) {
+            Method m = class_getInstanceMethod(moreCls, @selector(viewDidAppear:));
+            if (m) {
+                __block IMP orig = method_getImplementation(m);
+                method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
+                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
+                    if (!WXGet(kWXKeyFavLock)) return;
+                    // 多次尝试加按钮
+                    for (int i = 0; i < 5; i++) {
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((i + 1) * 0.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                            UIView *rootView = [(UIViewController *)self view];
+                            WXAddFavBtn(rootView);
+                        });
                     }
                 }));
             }
