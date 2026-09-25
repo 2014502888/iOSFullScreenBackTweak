@@ -104,6 +104,26 @@ static void WXInstall(void) {
                 }));
             }
         }
+
+        // 调试: hook所有UIViewController的viewDidAppear,当类名包含More时弹窗
+        Class vcCls = [UIViewController class];
+        Method m = class_getInstanceMethod(vcCls, @selector(viewDidAppear:));
+        if (m) {
+            __block IMP orig = method_getImplementation(m);
+            method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
+                ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
+                NSString *clsName = NSStringFromClass([self class]);
+                if ([clsName containsString:@"More"] || [clsName containsString:@"Setting"] || [clsName containsString:@"Me"]) {
+                    @try {
+                        UIViewController *vc = (UIViewController *)self;
+                        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"页面" message:clsName preferredStyle:UIAlertControllerStyleAlert];
+                        [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                        [vc presentViewController:alert animated:YES completion:nil];
+                    } @catch (__unused NSException *e) {}
+                }
+            }));
+        }
+
         for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
             if (![s isKindOfClass:[UIWindowScene class]]) continue;
             for (UIWindow *w in s.windows) {
