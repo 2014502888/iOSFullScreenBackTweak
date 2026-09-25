@@ -18,14 +18,6 @@ static void WXSet(NSString *key, BOOL val) {
     [[NSUserDefaults standardUserDefaults] setBool:val forKey:key];
 }
 
-// 记录最近访问的页面类名
-static NSMutableArray<NSString *> *WXPageHistory(void) {
-    static NSMutableArray *h;
-    static dispatch_once_t t;
-    dispatch_once(&t, ^{ h = [NSMutableArray array]; });
-    return h;
-}
-
 static UIViewController *WXTopVC(void) {
     UIWindowScene *ws = nil;
     for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
@@ -63,16 +55,6 @@ static void WXShowSettings(void) {
     [ac addAction:[UIAlertAction actionWithTitle:fl ? @"✓ 收藏上锁: 开" : @"  收藏上锁: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyFavLock, !fl); }]];
     BOOL qe = WXGet(kWXKeyQuickEdit);
     [ac addAction:[UIAlertAction actionWithTitle:qe ? @"✓ 快捷发送编辑: 开" : @"  快捷发送编辑: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyQuickEdit, !qe); }]];
-    // 调试:显示最近页面历史
-    [ac addAction:[UIAlertAction actionWithTitle:@"调试: 最近页面记录" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        NSMutableString *msg = [NSMutableString string];
-        for (NSString *s in WXPageHistory()) {
-            [msg appendFormat:@"%@\n", s];
-        }
-        UIAlertController *dbg = [UIAlertController alertControllerWithTitle:@"最近经过的页面" message:msg preferredStyle:UIAlertControllerStyleAlert];
-        [dbg addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleDefault handler:nil]];
-        [top presentViewController:dbg animated:YES completion:nil];
-    }]];
     [ac addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
     [top presentViewController:ac animated:YES completion:nil];
 }
@@ -94,36 +76,115 @@ static void WXShowSettings(void) {
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
 
-        // hook MMUIViewController基类,记录所有页面
-        Class baseCls = NSClassFromString(@"MMUIViewController");
-        if (baseCls) {
-            Method m = class_getInstanceMethod(baseCls, @selector(viewDidAppear:));
+        // === 1. 通话页面 VoIPCallerViewController ===
+        Class voipCls = NSClassFromString(@"VoIPCallerViewController");
+        if (voipCls) {
+            NSLog(@"[bgce] VoIPCallerViewController found");
+            // hook viewDidAppear: 通话出现时
+            Method m = class_getInstanceMethod(voipCls, @selector(viewDidAppear:));
             if (m) {
                 __block IMP orig = method_getImplementation(m);
                 method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
                     ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
                     @try {
-                        NSString *clsName = NSStringFromClass([self class]);
-                        NSMutableArray *h = WXPageHistory();
-                        [h addObject:clsName];
-                        if (h.count > 30) [h removeObjectAtIndex:0];
-
-                        // 收藏上锁:隐藏收藏cell
-                        if (WXGet(kWXKeyFavLock)) {
-                            UIView *v = [(UIViewController *)self view];
+                        UIView *v = [(UIViewController *)self view];
+                        // 拨号静音:通话出现时静音
+                        if (WXGet(kWXKeyMuteRingtone)) {
+                            AVAudioSession *session = [AVAudioSession sharedInstance];
+                            [session setCategory:AVAudioSessionCategoryRecord error:nil];
+                        }
+                        // 通话镜像
+                        if (WXGet(kWXKeyMirror)) {
+                            // 找视频预览层设镜像
                             for (UIView *sv in v.subviews) {
-                                if ([sv isKindOfClass:[UITableView class]]) {
-                                    UITableView *tv = (UITableView *)sv;
-                                    for (UITableViewCell *cell in tv.visibleCells) {
-                                        if ([cell.textLabel.text containsString:@"收藏"]) {
-                                            cell.hidden = YES;
-                                            cell.alpha = 0.0;
+                                if ([sv.layer isKindOfClass:NSClassFromString(@"AVCaptureVideoPreviewLayer")]) {
+                                    [(AVCaptureVideoPreviewLayer *)sv.layer setAutomaticallyConfiguresMirroring:NO];
+                                    [(AVCaptureVideoPreviewLayer *)sv.layer setMirrored:YES];
+                                }
+                            }
+                        }
+                        // 美颜按钮
+                        if (WXGet(kWXKeyBeauty)) {
+                            for (UIView *sv in v.subviews) { if (sv.tag == 99999) return; }
+                            UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+                            b.frame = CGRectMake(16, 80, 44, 44);
+                            b.layer.cornerRadius = 22;
+                            b.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.4];
+                            [b setTitle:@"美" forState:UIControlStateNormal];
+                            [b setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+                            b.tag = 99999;
+                            [v addSubview:b];
+                        }
+                    } @catch (__unused NSException *e) {}
+                }));
+            }
+        }
+
+        // === 2. "我"页面 MoreViewController: 隐藏收藏cell ===
+        Class moreCls = NSClassFromString(@"MoreViewController");
+        if (moreCls) {
+            Method m = class_getInstanceMethod(moreCls, @selector(viewDidAppear:));
+            if (m) {
+                __block IMP orig = method_getImplementation(m);
+                method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
+                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
+                    if (!WXGet(kWXKeyFavLock)) return;
+                    @try {
+                        UIView *v = [(UIViewController *)self view];
+                        // 递归找所有tableView和cell
+                        for (UIView *sv in v.subviews) {
+                            if ([sv isKindOfClass:[UITableView class]]) {
+                                UITableView *tv = (UITableView *)sv;
+                                for (UITableViewCell *cell in tv.visibleCells) {
+                                    NSString *text = cell.textLabel.text;
+                                    if (text && [text containsString:@"收藏"]) {
+                                        cell.hidden = YES;
+                                        cell.alpha = 0.0;
+                                    }
+                                }
+                            }
+                            // 也找UIScrollView里的tableView
+                            if ([sv isKindOfClass:[UIScrollView class]]) {
+                                for (UIView *ssv in sv.subviews) {
+                                    if ([ssv isKindOfClass:[UITableView class]]) {
+                                        UITableView *tv = (UITableView *)ssv;
+                                        for (UITableViewCell *cell in tv.visibleCells) {
+                                            NSString *text = cell.textLabel.text;
+                                            if (text && [text containsString:@"收藏"]) {
+                                                cell.hidden = YES;
+                                                cell.alpha = 0.0;
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     } @catch (__unused NSException *e) {}
+                }));
+            }
+        }
+
+        // === 3. 收藏列表 MyFavoritesViewController: 直接拦截 ===
+        Class favCls = NSClassFromString(@"MyFavoritesViewController");
+        if (favCls) {
+            Method m = class_getInstanceMethod(favCls, @selector(viewDidAppear:));
+            if (m) {
+                __block IMP orig = method_getImplementation(m);
+                method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
+                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
+                    if (WXGet(kWXKeyFavLock)) {
+                        // 弹密码框
+                        UIViewController *vc = (UIViewController *)self;
+                        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
+                        [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
+                        [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a){
+                            [vc.navigationController popViewControllerAnimated:YES];
+                        }]];
+                        [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+                            // 密码正确就留在收藏页
+                        }]];
+                        [vc presentViewController:alert animated:YES completion:nil];
+                    }
                 }));
             }
         }
