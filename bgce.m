@@ -73,7 +73,6 @@ static void WXShowSettings(void) {
 - (void)onBtn { WXShowSettings(); }
 @end
 
-// 递归找tableView
 static UITableView *WXFindTableView(UIView *v) {
     if ([v isKindOfClass:[UITableView class]]) return (UITableView *)v;
     for (UIView *sv in v.subviews) {
@@ -115,7 +114,6 @@ static void WXInstall(void) {
             }
         }
 
-        // 收藏上锁: hook MoreViewController的viewDidAppear
         Class moreCls = NSClassFromString(@"MoreViewController");
         if (moreCls) {
             Method m = class_getInstanceMethod(moreCls, @selector(viewDidAppear:));
@@ -123,7 +121,6 @@ static void WXInstall(void) {
                 __block IMP orig = method_getImplementation(m);
                 method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
                     ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
-                    if (!WXGet(kWXKeyFavLock)) return;
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                         @try {
                             UIView *rootView = [(UIViewController *)self view];
@@ -131,11 +128,16 @@ static void WXInstall(void) {
                             if (tv) {
                                 NSMutableString *msg = [NSMutableString string];
                                 for (UITableViewCell *cell in tv.visibleCells) {
-                                    NSString *text = cell.textLabel.text;
-                                    if (text) [msg appendFormat:@"%@\n", text];
+                                    // 遍历cell的subviews找UILabel
+                                    for (UIView *sv in cell.subviews) {
+                                        if ([sv isKindOfClass:[UILabel class]]) {
+                                            UILabel *lb = (UILabel *)sv;
+                                            if (lb.text && lb.text.length > 0) [msg appendFormat:@"%@\n", lb.text];
+                                        }
+                                    }
                                 }
                                 UIViewController *vc = (UIViewController *)self;
-                                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"cell列表" message:msg preferredStyle:UIAlertControllerStyleAlert];
+                                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"cell文字" message:msg preferredStyle:UIAlertControllerStyleAlert];
                                 [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
                                 [vc presentViewController:alert animated:YES completion:nil];
                             }
