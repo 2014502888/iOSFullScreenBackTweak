@@ -64,9 +64,6 @@ static void WXShowSettings(void) {
 static void WXBeauty_Hook(void) {
     Class voipCls = NSClassFromString(@"VoipView");
     if (!voipCls) return;
-    SEL origSel = @selector(viewDidAppear:);
-    Method origMethod = class_getInstanceMethod(voipCls, origSel);
-    if (!origMethod) return;
 }
 
 static void WXInstall(void) {
