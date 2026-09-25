@@ -73,6 +73,16 @@ static void WXShowSettings(void) {
 - (void)onBtn { WXShowSettings(); }
 @end
 
+// 递归找tableView
+static UITableView *WXFindTableView(UIView *v) {
+    if ([v isKindOfClass:[UITableView class]]) return (UITableView *)v;
+    for (UIView *sv in v.subviews) {
+        UITableView *t = WXFindTableView(sv);
+        if (t) return t;
+    }
+    return nil;
+}
+
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         Class voipCls = NSClassFromString(@"VoIPCallerViewController");
@@ -105,23 +115,34 @@ static void WXInstall(void) {
             }
         }
 
-        // 调试: hook所有UIViewController的viewDidAppear,当类名包含More时弹窗
-        Class vcCls = [UIViewController class];
-        Method m = class_getInstanceMethod(vcCls, @selector(viewDidAppear:));
-        if (m) {
-            __block IMP orig = method_getImplementation(m);
-            method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
-                ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
-                NSString *clsName = NSStringFromClass([self class]);
-                if ([clsName containsString:@"More"] || [clsName containsString:@"Setting"] || [clsName containsString:@"Me"]) {
-                    @try {
-                        UIViewController *vc = (UIViewController *)self;
-                        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"页面" message:clsName preferredStyle:UIAlertControllerStyleAlert];
-                        [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-                        [vc presentViewController:alert animated:YES completion:nil];
-                    } @catch (__unused NSException *e) {}
-                }
-            }));
+        // 收藏上锁: hook MoreViewController的viewDidAppear
+        Class moreCls = NSClassFromString(@"MoreViewController");
+        if (moreCls) {
+            Method m = class_getInstanceMethod(moreCls, @selector(viewDidAppear:));
+            if (m) {
+                __block IMP orig = method_getImplementation(m);
+                method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
+                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
+                    if (!WXGet(kWXKeyFavLock)) return;
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                        @try {
+                            UIView *rootView = [(UIViewController *)self view];
+                            UITableView *tv = WXFindTableView(rootView);
+                            if (tv) {
+                                NSMutableString *msg = [NSMutableString string];
+                                for (UITableViewCell *cell in tv.visibleCells) {
+                                    NSString *text = cell.textLabel.text;
+                                    if (text) [msg appendFormat:@"%@\n", text];
+                                }
+                                UIViewController *vc = (UIViewController *)self;
+                                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"cell列表" message:msg preferredStyle:UIAlertControllerStyleAlert];
+                                [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                                [vc presentViewController:alert animated:YES completion:nil];
+                            }
+                        } @catch (__unused NSException *e) {}
+                    });
+                }));
+            }
         }
 
         for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
