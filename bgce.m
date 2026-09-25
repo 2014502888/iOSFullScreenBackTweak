@@ -158,17 +158,16 @@ static void WXInstall(void) {
                                 }
                                 if (cell) {
                                     BOOL hasBtn = NO;
-                                    for (UIView *sv in cell.contentView.subviews) {
+                                    for (UIView *sv in cell.subviews) {
                                         if (sv.tag == 88888) { hasBtn = YES; break; }
                                     }
                                     if (!hasBtn) {
                                         UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
-                                        btn.frame = cell.contentView.bounds;
+                                        btn.frame = cell.bounds;
                                         btn.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
                                         btn.tag = 88888;
                                         [btn addTarget:[WXBtnTarget shared] action:@selector(onFavBtn) forControlEvents:UIControlEventTouchUpInside];
-                                        [cell.contentView addSubview:btn];
-                                        [cell.contentView bringSubviewToFront:btn];
+                                        [cell addSubview:btn];
                                     }
                                 }
                             }
