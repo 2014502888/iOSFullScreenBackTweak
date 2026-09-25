@@ -62,7 +62,6 @@ static void WXShowSettings(void) {
 @interface WXBtnTarget : NSObject
 + (instancetype)shared;
 - (void)onBtn;
-- (void)onFavBlock;
 @end
 @implementation WXBtnTarget
 + (instancetype)shared {
@@ -72,26 +71,11 @@ static void WXShowSettings(void) {
     return s;
 }
 - (void)onBtn { WXShowSettings(); }
-- (void)onFavBlock {
-    UIViewController *top = WXTopVC();
-    if (!top) return;
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
-    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
-    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
-            // 密码对了:通知用户手动点一次
-            UIAlertController *tip = [UIAlertController alertControllerWithTitle:@"已解锁" message:@"请再次点击收藏" preferredStyle:UIAlertControllerStyleAlert];
-            [tip addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-            [top presentViewController:tip animated:YES completion:nil];
-        }
-    }]];
-    [top presentViewController:alert animated:YES completion:nil];
-}
 @end
 
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
+        // 1. 通话页面
         Class voipCls = NSClassFromString(@"VoIPCallerViewController");
         if (voipCls) {
             Method m = class_getInstanceMethod(voipCls, @selector(viewDidAppear:));
@@ -129,69 +113,50 @@ static void WXInstall(void) {
                 }));
             }
         }
-        Class moreCls = NSClassFromString(@"MoreViewController");
-        if (moreCls) {
-            Method m = class_getInstanceMethod(moreCls, @selector(viewDidAppear:));
+        // 2. 收藏页:进入后盖黑遮罩+弹密码框
+        Class favCls = NSClassFromString(@"MyFavoritesViewController");
+        if (favCls) {
+            Method m = class_getInstanceMethod(favCls, @selector(viewDidAppear:));
             if (m) {
                 __block IMP orig = method_getImplementation(m);
                 method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
                     ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
                     if (!WXGet(kWXKeyFavLock)) return;
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                        @try {
-                            UIView *rootView = [(UIViewController *)self view];
-                            NSMutableArray *labels = [NSMutableArray array];
-                            void (^findLabels)(UIView *) = ^(UIView *v) {
-                                if ([v isKindOfClass:[UILabel class]]) [labels addObject:v];
-                                for (UIView *sv in v.subviews) findLabels(sv);
-                            };
-                            findLabels(rootView);
-                            for (UILabel *lb in labels) {
-                                if (lb.text && [lb.text containsString:@"收藏"]) {
-                                    UIView *cell = lb.superview;
-                                    while (cell && ![cell isKindOfClass:[UITableViewCell class]]) cell = cell.superview;
-                                    if (cell) {
-                                        BOOL hasBlock = NO;
-                                        for (UIView *sv in cell.subviews) { if (sv.tag == 77777) { hasBlock = YES; break; } }
-                                        if (!hasBlock) {
-                                            UIButton *blockBtn = [UIButton buttonWithType:UIButtonTypeCustom];
-                                            blockBtn.frame = cell.bounds;
-                                            blockBtn.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-                                            blockBtn.tag = 77777;
-                                            [blockBtn addTarget:[WXBtnTarget shared] action:@selector(onFavBlock) forControlEvents:UIControlEventTouchUpInside];
-                                            [cell addSubview:blockBtn];
-                                        }
-                                    }
-                                }
-                            }
-                        } @catch (__unused NSException *e) {}
-                    });
-                }));
-            }
-            SEL sel = NSSelectorFromString(@"onOpenMyFavoritesListController");
-            Method m2 = class_getInstanceMethod(moreCls, sel);
-            if (m2) {
-                __block IMP orig2 = method_getImplementation(m2);
-                method_setImplementation(m2, imp_implementationWithBlock(^(id self) {
-                    if (WXGet(kWXKeyFavLock)) {
-                        UIViewController *top = WXTopVC();
-                        if (top) {
+                    @try {
+                        UIViewController *vc = (UIViewController *)self;
+                        BOOL hasCover = NO;
+                        for (UIView *sv in vc.view.subviews) { if (sv.tag == 88888) { hasCover = YES; break; } }
+                        if (!hasCover) {
+                            UIView *cover = [[UIView alloc] initWithFrame:vc.view.bounds];
+                            cover.backgroundColor = [UIColor blackColor];
+                            cover.tag = 88888;
+                            cover.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+                            [vc.view addSubview:cover];
+                        }
+                        static BOOL hasAlert = NO;
+                        if (!hasAlert) {
+                            hasAlert = YES;
                             UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
                             [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
-                            [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+                            [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a){
+                                hasAlert = NO;
+                                [vc.navigationController popViewControllerAnimated:YES];
+                            }]];
                             [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+                                hasAlert = NO;
                                 if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
-                                    ((void(*)(id, SEL))orig2)(self, sel);
+                                    for (UIView *sv in vc.view.subviews) {
+                                        if (sv.tag == 88888) { [sv removeFromSuperview]; break; }
+                                    }
                                 }
                             }]];
-                            [top presentViewController:alert animated:YES completion:nil];
-                            return;
+                            [vc presentViewController:alert animated:YES completion:nil];
                         }
-                    }
-                    ((void(*)(id, SEL))orig2)(self, sel);
+                    } @catch (__unused NSException *e) {}
                 }));
             }
         }
+        // 悬浮按钮
         for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
             if (![s isKindOfClass:[UIWindowScene class]]) continue;
             for (UIWindow *w in s.windows) {
