@@ -120,24 +120,7 @@ static void WXInstall(void) {
             }
         }
 
-        // === 4. 收藏上锁 ===
-        Class meCls = NSClassFromString(@"MMSystemSettingViewController");
-        if (!meCls) meCls = NSClassFromString(@"WCTMainPageViewController");
-        if (meCls) {
-            Method m = class_getInstanceMethod(meCls, @selector(tableView:cellForRowAtIndexPath:));
-            if (m) {
-                __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^UITableViewCell *(id self, UITableView *tv, NSIndexPath *ip) {
-                    UITableViewCell *cell = ((UITableViewCell *(*)(id, SEL, UITableView *, NSIndexPath *))orig)(self, @selector(tableView:cellForRowAtIndexPath:), tv, ip);
-                    if (!WXGet(kWXKeyFavLock)) return cell;
-                    @try {
-                        NSString *t = cell.textLabel.text;
-                        if (t && [t containsString:@"收藏"]) { cell.hidden = YES; cell.alpha = 0.0; }
-                    } @catch (__unused NSException *e) {}
-                    return cell;
-                }));
-            }
-        }
+        // === 4. 收藏上锁(暂不启用) ===
 
         // 悬浮按钮
         for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
