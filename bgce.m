@@ -74,12 +74,6 @@ static void WXInstall(void) {
                 __block IMP orig = method_getImplementation(m);
                 method_setImplementation(m, imp_implementationWithBlock(^(id self) {
                     ((void(*)(id, SEL))orig)(self, @selector(layoutSubviews));
-                    if (!WXGet(kWXKeyMirror)) return;
-                    @try {
-                        for (UIView *sv in [(UIView *)self subviews]) {
-                            sv.transform = CGAffineTransformMakeScale(-1.0, 1.0);
-                        }
-                    } @catch (__unused NSException *e) {}
                 }));
             }
         }
