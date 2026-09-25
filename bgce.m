@@ -164,29 +164,37 @@ static void WXInstall(void) {
             }
         }
 
-        // === 3. 收藏列表 MyFavoritesViewController: 在页面显示前拦截 ===
+        // === 3. 收藏列表 MyFavoritesViewController: 弹出密码框+遮挡内容 ===
         Class favCls = NSClassFromString(@"MyFavoritesViewController");
         if (favCls) {
-            Method m = class_getInstanceMethod(favCls, @selector(viewWillAppear:));
+            Method m = class_getInstanceMethod(favCls, @selector(viewDidAppear:));
             if (m) {
                 __block IMP orig = method_getImplementation(m);
                 method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
-                    if (WXGet(kWXKeyFavLock)) {
-                        // 先弹密码框,再调用原始方法(页面内容会在后面显示,但被密码框挡住)
+                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
+                    if (!WXGet(kWXKeyFavLock)) return;
+                    @try {
                         UIViewController *vc = (UIViewController *)self;
-                        ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewWillAppear:), animated);
+                        // 加一个全屏遮挡view
+                        UIView *cover = [[UIView alloc] initWithFrame:vc.view.bounds];
+                        cover.backgroundColor = [UIColor blackColor];
+                        cover.tag = 88888;
+                        cover.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+                        [vc.view addSubview:cover];
+                        // 弹密码框
                         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
                         [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
                         [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a){
                             [vc.navigationController popViewControllerAnimated:YES];
                         }]];
                         [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-                            // 密码正确就留在收藏页
+                            // 移除遮挡
+                            for (UIView *sv in vc.view.subviews) {
+                                if (sv.tag == 88888) { [sv removeFromSuperview]; break; }
+                            }
                         }]];
                         [vc presentViewController:alert animated:YES completion:nil];
-                        return;
-                    }
-                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewWillAppear:), animated);
+                    } @catch (__unused NSException *e) {}
                 }));
             }
         }
