@@ -142,29 +142,32 @@ static void WXInstall(void) {
             }
         }
 
-        // === 2. 拦截导航push:点收藏时不进收藏页,先弹密码框 ===
-        Method m = class_getInstanceMethod([UINavigationController class], @selector(pushViewController:animated:));
-        if (m) {
-            __block IMP orig = method_getImplementation(m);
-            method_setImplementation(m, imp_implementationWithBlock(^(UINavigationController *self, UIViewController *vc, BOOL animated) {
-                if (WXGet(kWXKeyFavLock) &&
-                    [NSStringFromClass([vc class]) isEqualToString:@"MyFavoritesViewController"]) {
-                    UIViewController *top = WXTopVC();
-                    if (top) {
-                        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
-                        [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
-                        [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-                        [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-                            if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
-                                ((void(*)(id, SEL, id, BOOL))orig)(self, @selector(pushViewController:animated:), vc, animated);
-                            }
-                        }]];
-                        [top presentViewController:alert animated:YES completion:nil];
-                        return;
+        // === 2. hook MMUIViewController.onOpenMyFavoritesListController 拦截收藏入口 ===
+        Class baseCls = NSClassFromString(@"MMUIViewController");
+        if (baseCls) {
+            SEL sel = NSSelectorFromString(@"onOpenMyFavoritesListController");
+            Method m = class_getInstanceMethod(baseCls, sel);
+            if (m) {
+                __block IMP orig = method_getImplementation(m);
+                method_setImplementation(m, imp_implementationWithBlock(^(id self) {
+                    if (WXGet(kWXKeyFavLock)) {
+                        UIViewController *top = WXTopVC();
+                        if (top) {
+                            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
+                            [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
+                            [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+                            [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+                                if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
+                                    ((void(*)(id, SEL))orig)(self, sel);
+                                }
+                            }]];
+                            [top presentViewController:alert animated:YES completion:nil];
+                            return;
+                        }
                     }
-                }
-                ((void(*)(id, SEL, id, BOOL))orig)(self, @selector(pushViewController:animated:), vc, animated);
-            }));
+                    ((void(*)(id, SEL))orig)(self, sel);
+                }));
+            }
         }
 
         // 悬浮按钮
