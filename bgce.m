@@ -82,6 +82,15 @@ static UITableView *WXFindTableView(UIView *v) {
     return nil;
 }
 
+// 递归找所有UILabel
+static void WXFindLabels(UIView *v, NSMutableString *msg) {
+    if ([v isKindOfClass:[UILabel class]]) {
+        UILabel *lb = (UILabel *)v;
+        if (lb.text && lb.text.length > 0) [msg appendFormat:@"%@\n", lb.text];
+    }
+    for (UIView *sv in v.subviews) WXFindLabels(sv, msg);
+}
+
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         Class voipCls = NSClassFromString(@"VoIPCallerViewController");
@@ -124,23 +133,12 @@ static void WXInstall(void) {
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                         @try {
                             UIView *rootView = [(UIViewController *)self view];
-                            UITableView *tv = WXFindTableView(rootView);
-                            if (tv) {
-                                NSMutableString *msg = [NSMutableString string];
-                                for (UITableViewCell *cell in tv.visibleCells) {
-                                    // 遍历cell的subviews找UILabel
-                                    for (UIView *sv in cell.subviews) {
-                                        if ([sv isKindOfClass:[UILabel class]]) {
-                                            UILabel *lb = (UILabel *)sv;
-                                            if (lb.text && lb.text.length > 0) [msg appendFormat:@"%@\n", lb.text];
-                                        }
-                                    }
-                                }
-                                UIViewController *vc = (UIViewController *)self;
-                                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"cell文字" message:msg preferredStyle:UIAlertControllerStyleAlert];
-                                [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-                                [vc presentViewController:alert animated:YES completion:nil];
-                            }
+                            NSMutableString *msg = [NSMutableString string];
+                            WXFindLabels(rootView, msg);
+                            UIViewController *vc = (UIViewController *)self;
+                            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"所有文字" message:msg preferredStyle:UIAlertControllerStyleAlert];
+                            [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                            [vc presentViewController:alert animated:YES completion:nil];
                         } @catch (__unused NSException *e) {}
                     });
                 }));
