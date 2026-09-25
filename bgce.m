@@ -61,8 +61,77 @@ static void WXShowSettings(void) {
 - (void)onBtn { WXShowSettings(); }
 @end
 
+// ==================== 1. 通话美颜 ====================
+static void WXBeauty_Hook(void) {
+    Class voipCls = NSClassFromString(@"VoipView");
+    if (!voipCls) voipCls = NSClassFromString(@"MMVoipViewController");
+    if (!voipCls) return;
+    SEL origSel = @selector(viewDidAppear:);
+    Method origMethod = class_getInstanceMethod(voipCls, origSel);
+    if (!origMethod) return;
+    __block IMP origImp = method_getImplementation(origMethod);
+    void (^block)(id, BOOL) = ^(id self, BOOL animated) {
+        ((void(*)(id, SEL, BOOL))origImp)(self, origSel, animated);
+        if (!WXGet(kWXKeyBeauty)) return;
+        @try {
+            UIView *view = [(UIViewController *)self view];
+            if (!view) return;
+            for (UIView *sv in view.subviews) { if (sv.tag == 99999) return; }
+            UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+            btn.frame = CGRectMake(16, 80, 44, 44);
+            btn.layer.cornerRadius = 22;
+            btn.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.4];
+            [btn setTitle:@"美" forState:UIControlStateNormal];
+            [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            btn.tag = 99999;
+            [view addSubview:btn];
+        } @catch (__unused NSException *e) {}
+    };
+    method_setImplementation(origMethod, imp_implementationWithBlock(block));
+}
+
+// ==================== 3. 来电静音铃声 ====================
+static void WXMuteRingtone_Hook(void) {
+    Class playerCls = NSClassFromString(@"AVAudioPlayer");
+    if (!playerCls) return;
+    SEL sel = @selector(play);
+    Method m = class_getInstanceMethod(playerCls, sel);
+    if (!m) return;
+    __block IMP origImp = method_getImplementation(m);
+    void (^block)(id) = ^(id self) {
+        ((void(*)(id, SEL))origImp)(self, sel);
+        if (!WXGet(kWXKeyMuteRingtone)) return;
+        @try { [self setValue:@0.0 forKey:@"volume"]; } @catch (__unused NSException *e) {}
+    };
+    method_setImplementation(m, imp_implementationWithBlock(block));
+}
+
+// ==================== 4. 收藏上锁 ====================
+static void WXFavLock_Hook(void) {
+    Class meCls = NSClassFromString(@"MMSystemSettingViewController");
+    if (!meCls) meCls = NSClassFromString(@"WCTMainPageViewController");
+    if (!meCls) return;
+    SEL sel = @selector(tableView:cellForRowAtIndexPath:);
+    Method m = class_getInstanceMethod(meCls, sel);
+    if (!m) return;
+    __block IMP origImp = method_getImplementation(m);
+    void (^block)(id, UITableView *, NSIndexPath *) = ^(id self, UITableView *tv, NSIndexPath *ip) {
+        UITableViewCell *cell = ((UITableViewCell *(*)(id, SEL, UITableView *, NSIndexPath *))origImp)(self, sel, tv, ip);
+        if (!WXGet(kWXKeyFavLock)) return cell;
+        @try {
+            NSString *text = cell.textLabel.text;
+            if (text && [text containsString:@"收藏"]) { cell.hidden = YES; cell.alpha = 0.0; }
+        } @catch (__unused NSException *e) {}
+        return cell;
+    };
+    method_setImplementation(m, imp_implementationWithBlock(block));
+}
+
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
+        WXBeauty_Hook();
+        WXMuteRingtone_Hook();
+        WXFavLock_Hook();
         for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
             if (![s isKindOfClass:[UIWindowScene class]]) continue;
             for (UIWindow *w in s.windows) {
