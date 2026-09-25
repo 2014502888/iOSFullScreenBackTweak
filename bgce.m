@@ -106,6 +106,33 @@ static void WXShowSettings(void) {
 - (void)onFavBtn { WXShowPasswordAlert(); }
 @end
 
+static void WXInstallFavLock(UIView *rootView) {
+    @try {
+        UILabel *favLabel = WXFindLabel(rootView, @"收藏");
+        if (favLabel) {
+            UIView *cell = favLabel;
+            while (cell && ![cell isKindOfClass:[UITableViewCell class]]) {
+                cell = cell.superview;
+            }
+            if (cell) {
+                BOOL hasBtn = NO;
+                for (UIView *sv in cell.subviews) {
+                    if (sv.tag == 88888) { hasBtn = YES; break; }
+                }
+                if (!hasBtn) {
+                    UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
+                    btn.frame = cell.bounds;
+                    btn.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+                    btn.tag = 88888;
+                    [btn addTarget:[WXBtnTarget shared] action:@selector(onFavBtn) forControlEvents:UIControlEventTouchUpInside];
+                    [cell addSubview:btn];
+                    [cell bringSubviewToFront:btn];
+                }
+            }
+        }
+    } @catch (__unused NSException *e) {}
+}
+
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         Class voipCls = NSClassFromString(@"VoIPCallerViewController");
@@ -147,32 +174,13 @@ static void WXInstall(void) {
                     ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
                     gMoreVC = (UIViewController *)self;
                     if (!WXGet(kWXKeyFavLock)) return;
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                        @try {
+                    // 延迟1秒,多次尝试
+                    for (int i = 1; i <= 3; i++) {
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                             UIView *rootView = [(UIViewController *)self view];
-                            UILabel *favLabel = WXFindLabel(rootView, @"收藏");
-                            if (favLabel) {
-                                UIView *cell = favLabel;
-                                while (cell && ![cell isKindOfClass:[UITableViewCell class]]) {
-                                    cell = cell.superview;
-                                }
-                                if (cell) {
-                                    BOOL hasBtn = NO;
-                                    for (UIView *sv in cell.subviews) {
-                                        if (sv.tag == 88888) { hasBtn = YES; break; }
-                                    }
-                                    if (!hasBtn) {
-                                        UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
-                                        btn.frame = cell.bounds;
-                                        btn.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-                                        btn.tag = 88888;
-                                        [btn addTarget:[WXBtnTarget shared] action:@selector(onFavBtn) forControlEvents:UIControlEventTouchUpInside];
-                                        [cell addSubview:btn];
-                                    }
-                                }
-                            }
-                        } @catch (__unused NSException *e) {}
-                    });
+                            WXInstallFavLock(rootView);
+                        });
+                    }
                 }));
             }
         }
