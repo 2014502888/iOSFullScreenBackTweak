@@ -24,7 +24,19 @@ static UIViewController *WXTopVC(void) {
     }
     if (!ws) return nil;
     UIViewController *vc = ws.windows.firstObject.rootViewController;
-    while (vc.presentedViewController) vc = vc.presentedViewController;
+    while (YES) {
+        if (vc.presentedViewController && ![vc.presentedViewController isBeingDismissed]) {
+            vc = vc.presentedViewController;
+        } else if ([vc isKindOfClass:[UITabBarController class]]) {
+            UIViewController *sel = [(UITabBarController *)vc selectedViewController];
+            if (sel) vc = sel; else break;
+        } else if ([vc isKindOfClass:[UINavigationController class]]) {
+            UIViewController *top = [(UINavigationController *)vc topViewController];
+            if (top) vc = top; else break;
+        } else {
+            break;
+        }
+    }
     return vc;
 }
 
