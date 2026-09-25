@@ -61,8 +61,91 @@ static void WXShowSettings(void) {
 - (void)onBtn { WXShowSettings(); }
 @end
 
+// ==================== Hook工具函数 ====================
+static void WXHookMethod(Class cls, SEL sel, id block) {
+    if (!cls) return;
+    Method m = class_getInstanceMethod(cls, sel);
+    if (!m) return;
+    method_setImplementation(m, imp_implementationWithBlock(block));
+}
+
+// ==================== 1. 通话美颜 ====================
+static void WXBeauty_Hook(void) {
+    Class cls = NSClassFromString(@"VoipView");
+    if (!cls) cls = NSClassFromString(@"MMVoipViewController");
+    if (!cls) return;
+    WXHookMethod(cls, @selector(viewDidAppear:), ^(id self, BOOL animated) {
+        // 调原方法
+        IMP orig = class_getMethodImplementation(cls, @selector(viewDidAppear:));
+        ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
+        if (!WXGet(kWXKeyBeauty)) return;
+        @try {
+            UIView *view = [(UIViewController *)self view];
+            if (!view) return;
+            for (UIView *sv in view.subviews) { if (sv.tag == 99999) return; }
+            UIButton *btn = [UIButton buttonWithType:UIButtonTypeSystem];
+            btn.frame = CGRectMake(16, 80, 44, 44);
+            btn.layer.cornerRadius = 22;
+            btn.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.4];
+            [btn setTitle:@"美" forState:UIControlStateNormal];
+            [btn setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+            btn.tag = 99999;
+            [view addSubview:btn];
+        } @catch (__unused NSException *e) {}
+    });
+}
+
+// ==================== 2. 通话镜像 ====================
+static void WXMirror_Hook(void) {
+    Class cls = NSClassFromString(@"VoipView");
+    if (!cls) return;
+    WXHookMethod(cls, @selector(layoutSubviews), ^(id self) {
+        IMP orig = class_getMethodImplementation(cls, @selector(layoutSubviews));
+        ((void(*)(id, SEL))orig)(self, @selector(layoutSubviews));
+        if (!WXGet(kWXKeyMirror)) return;
+        @try {
+            for (UIView *sv in [(UIView *)self subviews]) {
+                sv.transform = CGAffineTransformMakeScale(-1.0, 1.0);
+            }
+        } @catch (__unused NSException *e) {}
+    });
+}
+
+// ==================== 3. 来电静音铃声 ====================
+static void WXMuteRingtone_Hook(void) {
+    Class cls = NSClassFromString(@"AVAudioPlayer");
+    if (!cls) return;
+    WXHookMethod(cls, @selector(play), ^(id self) {
+        IMP orig = class_getMethodImplementation(cls, @selector(play));
+        ((void(*)(id, SEL))orig)(self, @selector(play));
+        if (!WXGet(kWXKeyMuteRingtone)) return;
+        @try { [self setValue:@0.0 forKey:@"volume"]; } @catch (__unused NSException *e) {}
+    });
+}
+
+// ==================== 4. 收藏上锁 ====================
+static void WXFavLock_Hook(void) {
+    Class cls = NSClassFromString(@"MMSystemSettingViewController");
+    if (!cls) cls = NSClassFromString(@"WCTMainPageViewController");
+    if (!cls) return;
+    WXHookMethod(cls, @selector(tableView:cellForRowAtIndexPath:), ^(id self, UITableView *tv, NSIndexPath *ip) {
+        IMP orig = class_getMethodImplementation(cls, @selector(tableView:cellForRowAtIndexPath:));
+        UITableViewCell *cell = ((UITableViewCell *(*)(id, SEL, UITableView *, NSIndexPath *))orig)(self, @selector(tableView:cellForRowAtIndexPath:), tv, ip);
+        if (!WXGet(kWXKeyFavLock)) return cell;
+        @try {
+            NSString *text = cell.textLabel.text;
+            if (text && [text containsString:@"收藏"]) { cell.hidden = YES; cell.alpha = 0.0; }
+        } @catch (__unused NSException *e) {}
+        return cell;
+    });
+}
+
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
+        WXBeauty_Hook();
+        WXMirror_Hook();
+        WXMuteRingtone_Hook();
+        WXFavLock_Hook();
         for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
             if (![s isKindOfClass:[UIWindowScene class]]) continue;
             for (UIWindow *w in s.windows) {
