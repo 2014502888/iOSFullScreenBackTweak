@@ -142,9 +142,10 @@ static void WXInstall(void) {
             }
         }
 
-        // === 2. hook MMUIViewController.onOpenMyFavoritesListController 拦截收藏入口 ===
+        // === 2. 拦截收藏:hook onOpenMyFavoritesListController + tableView选中 ===
         Class baseCls = NSClassFromString(@"MMUIViewController");
         if (baseCls) {
+            // 方法A: hook onOpenMyFavoritesListController
             SEL sel = NSSelectorFromString(@"onOpenMyFavoritesListController");
             Method m = class_getInstanceMethod(baseCls, sel);
             if (m) {
@@ -166,6 +167,35 @@ static void WXInstall(void) {
                         }
                     }
                     ((void(*)(id, SEL))orig)(self, sel);
+                }));
+            }
+            // 方法B: hook tableView:didSelectRowAtIndexPath:
+            SEL sel2 = @selector(tableView:didSelectRowAtIndexPath:);
+            Method m2 = class_getInstanceMethod(baseCls, sel2);
+            if (m2) {
+                __block IMP orig2 = method_getImplementation(m2);
+                method_setImplementation(m2, imp_implementationWithBlock(^(id self, UITableView *tv, NSIndexPath *ip) {
+                    if (WXGet(kWXKeyFavLock) &&
+                        [NSStringFromClass([self class]) isEqualToString:@"MoreViewController"]) {
+                        UITableViewCell *cell = [tv cellForRowAtIndexPath:ip];
+                        NSString *text = cell.textLabel.text;
+                        if (text && [text containsString:@"收藏"]) {
+                            UIViewController *top = WXTopVC();
+                            if (top) {
+                                UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
+                                [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
+                                [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+                                [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+                                    if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
+                                        ((void(*)(id, SEL, id, id))orig2)(self, sel2, tv, ip);
+                                    }
+                                }]];
+                                [top presentViewController:alert animated:YES completion:nil];
+                                return;
+                            }
+                        }
+                    }
+                    ((void(*)(id, SEL, id, id))orig2)(self, sel2, tv, ip);
                 }));
             }
         }
