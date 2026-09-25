@@ -67,8 +67,11 @@ static void WXInstall(void) {
         if (cls) {
             Method m = class_getInstanceMethod(cls, @selector(viewDidAppear:));
             if (m) {
-                IMP orig = method_getImplementation(m);
-                NSLog(@"found viewDidAppear at %p", orig);
+                __block IMP orig = method_getImplementation(m);
+                void (^block)(id, BOOL) = ^(id self, BOOL animated) {
+                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
+                };
+                method_setImplementation(m, imp_implementationWithBlock(block));
             }
         }
         for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
