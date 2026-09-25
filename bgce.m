@@ -7,7 +7,8 @@ static NSString *kWXKeyBeauty = @"wx_beauty";
 static NSString *kWXKeyMirror  = @"wx_mirror";
 static NSString *kWXKeyMuteRingtone = @"wx_mute_ring";
 static NSString *kWXKeyFavLock = @"wx_fav_lock";
-static NSString *kWXKeyQuickEdit = @"wx_quick_edit";
+
+static UIViewController *gMoreVC = nil;
 
 static BOOL WXGet(NSString *key) {
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
@@ -65,20 +66,8 @@ static void WXOpenFavWithPassword(void) {
     [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
         UITextField *tf = alert.textFields.firstObject;
         if ([tf.text isEqualToString:@"1234"]) {
-            // 找MoreViewController并调用onOpenMyFavoritesListController
-            UIViewController *vc = WXTopVC();
-            // 递归找MoreViewController
-            UIViewController *target = nil;
-            void (^findMore)(UIViewController *) = ^(UIViewController *v) {
-                if ([NSStringFromClass([v class]) isEqualToString:@"MoreViewController"]) {
-                    target = v;
-                    return;
-                }
-                for (UIViewController *child in v.childViewControllers) findMore(child);
-            };
-            findMore(vc);
-            if (target && [target respondsToSelector:@selector(onOpenMyFavoritesListController)]) {
-                ((void(*)(id, SEL))objc_msgSend)(target, @selector(onOpenMyFavoritesListController));
+            if (gMoreVC && [gMoreVC respondsToSelector:@selector(onOpenMyFavoritesListController)]) {
+                ((void(*)(id, SEL))objc_msgSend)(gMoreVC, @selector(onOpenMyFavoritesListController));
             }
         }
     }]];
@@ -148,7 +137,6 @@ static void WXInstall(void) {
             }
         }
 
-        // 收藏上锁: 隐藏收藏cell
         Class moreCls = NSClassFromString(@"MoreViewController");
         if (moreCls) {
             Method m = class_getInstanceMethod(moreCls, @selector(viewDidAppear:));
@@ -156,6 +144,7 @@ static void WXInstall(void) {
                 __block IMP orig = method_getImplementation(m);
                 method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
                     ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
+                    gMoreVC = (UIViewController *)self;
                     if (!WXGet(kWXKeyFavLock)) return;
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                         @try {
