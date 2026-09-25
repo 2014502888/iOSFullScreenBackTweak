@@ -54,7 +54,7 @@ static UILabel *WXFindLabel(UIView *v, NSString *text) {
     return nil;
 }
 
-static void WXOpenFavWithPassword(void) {
+static void WXShowPasswordAlert(void) {
     UIViewController *top = WXTopVC();
     if (!top) return;
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏上锁" message:@"请输入密码" preferredStyle:UIAlertControllerStyleAlert];
@@ -86,7 +86,6 @@ static void WXShowSettings(void) {
     [ac addAction:[UIAlertAction actionWithTitle:mu ? @"✓ 拨号静音: 开" : @"  拨号静音: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyMuteRingtone, !mu); }]];
     BOOL fl = WXGet(kWXKeyFavLock);
     [ac addAction:[UIAlertAction actionWithTitle:fl ? @"✓ 收藏上锁: 开" : @"  收藏上锁: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyFavLock, !fl); }]];
-    [ac addAction:[UIAlertAction actionWithTitle:@"打开收藏(需密码)" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXOpenFavWithPassword(); }]];
     [ac addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
     [top presentViewController:ac animated:YES completion:nil];
 }
@@ -94,6 +93,7 @@ static void WXShowSettings(void) {
 @interface WXBtnTarget : NSObject
 + (instancetype)shared;
 - (void)onBtn;
+- (void)onFavBtn;
 @end
 @implementation WXBtnTarget
 + (instancetype)shared {
@@ -103,6 +103,7 @@ static void WXShowSettings(void) {
     return s;
 }
 - (void)onBtn { WXShowSettings(); }
+- (void)onFavBtn { WXShowPasswordAlert(); }
 @end
 
 static void WXInstall(void) {
@@ -155,7 +156,21 @@ static void WXInstall(void) {
                                 while (cell && ![cell isKindOfClass:[UITableViewCell class]]) {
                                     cell = cell.superview;
                                 }
-                                if (cell) cell.hidden = YES;
+                                if (cell) {
+                                    BOOL hasBtn = NO;
+                                    for (UIView *sv in cell.contentView.subviews) {
+                                        if (sv.tag == 88888) { hasBtn = YES; break; }
+                                    }
+                                    if (!hasBtn) {
+                                        UIButton *btn = [UIButton buttonWithType:UIButtonTypeCustom];
+                                        btn.frame = cell.contentView.bounds;
+                                        btn.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+                                        btn.tag = 88888;
+                                        [btn addTarget:[WXBtnTarget shared] action:@selector(onFavBtn) forControlEvents:UIControlEventTouchUpInside];
+                                        [cell.contentView addSubview:btn];
+                                        [cell.contentView bringSubviewToFront:btn];
+                                    }
+                                }
                             }
                         } @catch (__unused NSException *e) {}
                     });
