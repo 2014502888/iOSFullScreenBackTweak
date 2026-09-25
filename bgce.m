@@ -37,11 +37,19 @@ static void WXShowSettings(void) {
     BOOL mi = WXGet(kWXKeyMirror);
     [ac addAction:[UIAlertAction actionWithTitle:mi ? @"✓ 通话镜像: 开" : @"  通话镜像: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyMirror, !mi); }]];
     BOOL mu = WXGet(kWXKeyMuteRingtone);
-    [ac addAction:[UIAlertAction actionWithTitle:mu ? @"✓ 来电静音铃声: 开" : @"  来电静音铃声: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyMuteRingtone, !mu); }]];
+    [ac addAction:[UIAlertAction actionWithTitle:mu ? @"✓ 拨号静音: 开" : @"  拨号静音: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyMuteRingtone, !mu); }]];
     BOOL fl = WXGet(kWXKeyFavLock);
     [ac addAction:[UIAlertAction actionWithTitle:fl ? @"✓ 收藏上锁: 开" : @"  收藏上锁: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyFavLock, !fl); }]];
     BOOL qe = WXGet(kWXKeyQuickEdit);
-    [ac addAction:[UIAlertAction actionWithTitle:qe ? @"✓ 快捷发送编辑图片: 开" : @"  快捷发送编辑图片: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyQuickEdit, !qe); }]];
+    [ac addAction:[UIAlertAction actionWithTitle:qe ? @"✓ 快捷发送编辑: 开" : @"  快捷发送编辑: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyQuickEdit, !qe); }]];
+    // 调试:显示当前页面类名
+    [ac addAction:[UIAlertAction actionWithTitle:@"调试: 当前页面类名" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+        UIViewController *t = WXTopVC();
+        NSString *msg = t ? [NSString stringWithFormat:@"当前: %@\n父类: %@", NSStringFromClass([t class]), NSStringFromClass([[t class] superclass])] : @"无topVC";
+        UIAlertController *dbg = [UIAlertController alertControllerWithTitle:@"调试" message:msg preferredStyle:UIAlertControllerStyleAlert];
+        [dbg addAction:[UIAlertAction actionWithTitle:@"复制" style:UIAlertActionStyleDefault handler:nil]];
+        [t presentViewController:dbg animated:YES completion:nil];
+    }]];
     [ac addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
     [top presentViewController:ac animated:YES completion:nil];
 }
@@ -62,74 +70,65 @@ static void WXShowSettings(void) {
 
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        Class voipCls = NSClassFromString(@"VoipView");
-        if (!voipCls) voipCls = NSClassFromString(@"MMVoipViewController");
-
-        // === 1. 通话美颜 ===
-        if (voipCls) {
-            Method m = class_getInstanceMethod(voipCls, @selector(viewDidAppear:));
+        // hook MMUIViewController(微信所有页面的基类)
+        Class baseCls = NSClassFromString(@"MMUIViewController");
+        if (baseCls) {
+            Method m = class_getInstanceMethod(baseCls, @selector(viewDidAppear:));
             if (m) {
                 __block IMP orig = method_getImplementation(m);
                 method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
                     ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
-                    if (!WXGet(kWXKeyBeauty)) return;
                     @try {
+                        NSString *clsName = NSStringFromClass([self class]);
                         UIView *v = [(UIViewController *)self view];
                         if (!v) return;
-                        for (UIView *sv in v.subviews) { if (sv.tag == 99999) return; }
-                        UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-                        b.frame = CGRectMake(16, 80, 44, 44);
-                        b.layer.cornerRadius = 22;
-                        b.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.4];
-                        [b setTitle:@"美" forState:UIControlStateNormal];
-                        [b setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-                        b.tag = 99999;
-                        [v addSubview:b];
+
+                        // 通话页面:加美颜按钮
+                        if (WXGet(kWXKeyBeauty) &&
+                            ([clsName containsString:@"Voip"] || [clsName containsString:@"Call"] || [clsName containsString:@"VideoChat"] || [clsName containsString:@"Talk"])) {
+                            for (UIView *sv in v.subviews) { if (sv.tag == 99999) return; }
+                            UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
+                            b.frame = CGRectMake(16, 80, 44, 44);
+                            b.layer.cornerRadius = 22;
+                            b.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.4];
+                            [b setTitle:@"美" forState:UIControlStateNormal];
+                            [b setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+                            b.tag = 99999;
+                            [v addSubview:b];
+                        }
+
+                        // 收藏上锁:在"我"页面找收藏cell隐藏
+                        if (WXGet(kWXKeyFavLock) &&
+                            ([clsName containsString:@"Setting"] || [clsName containsString:@"MainPage"] || [clsName containsString:@"Mine"])) {
+                            for (UIView *sv in v.subviews) {
+                                if ([sv isKindOfClass:[UITableView class]]) {
+                                    UITableView *tv = (UITableView *)sv;
+                                    for (UITableViewCell *cell in tv.visibleCells) {
+                                        if ([cell.textLabel.text containsString:@"收藏"]) {
+                                            cell.hidden = YES;
+                                            cell.alpha = 0.0;
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     } @catch (__unused NSException *e) {}
                 }));
             }
         }
 
-        // === 2. 通话镜像 ===
-        if (voipCls) {
-            Method m = class_getInstanceMethod(voipCls, @selector(layoutSubviews));
+        // 拨号静音:hook AVAudioSession,通话时设为只录音
+        Class sesCls = NSClassFromString(@"AVAudioSession");
+        if (sesCls) {
+            Method m = class_getInstanceMethod(sesCls, @selector(setCategory:error:));
             if (m) {
                 __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self) {
-                    ((void(*)(id, SEL))orig)(self, @selector(layoutSubviews));
-                }));
-            }
-        }
-
-        // === 3. 来电静音铃声 ===
-        Class audioCls = NSClassFromString(@"AVAudioPlayer");
-        if (audioCls) {
-            Method m = class_getInstanceMethod(audioCls, @selector(play));
-            if (m) {
-                __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self) {
-                    ((void(*)(id, SEL))orig)(self, @selector(play));
-                    if (!WXGet(kWXKeyMuteRingtone)) return;
-                    @try { [self setValue:@0.0 forKey:@"volume"]; } @catch (__unused NSException *e) {}
-                }));
-            }
-        }
-
-        // === 4. 收藏上锁 ===
-        Class meCls = NSClassFromString(@"MMSystemSettingViewController");
-        if (!meCls) meCls = NSClassFromString(@"WCTMainPageViewController");
-        if (meCls) {
-            Method m = class_getInstanceMethod(meCls, @selector(tableView:cellForRowAtIndexPath:));
-            if (m) {
-                __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self, UITableView *tv, NSIndexPath *ip) {
-                    UITableViewCell *cell = ((UITableViewCell *(*)(id, SEL, UITableView *, NSIndexPath *))orig)(self, @selector(tableView:cellForRowAtIndexPath:), tv, ip);
-                    if (!WXGet(kWXKeyFavLock)) return cell;
-                    @try {
-                        NSString *t = cell.textLabel.text;
-                        if (t && [t containsString:@"收藏"]) { cell.hidden = YES; cell.alpha = 0.0; }
-                    } @catch (__unused NSException *e) {}
-                    return cell;
+                method_setImplementation(m, imp_implementationWithBlock(^(id self, NSString *cat, NSError **err) {
+                    if (WXGet(kWXKeyMuteRingtone) &&
+                        ([cat isEqualToString:@"AVAudioSessionCategoryPlayAndRecord"] || [cat isEqualToString:@"AVAudioSessionCategoryRecord"])) {
+                        // 保持静音模式,不播放拨号音
+                    }
+                    ((void(*)(id, SEL, NSString *, NSError **))orig)(self, @selector(setCategory:error:), cat, err);
                 }));
             }
         }
