@@ -80,18 +80,10 @@ static void WXShowSettings(void) {
     [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
     [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
         if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
-            UIView *v = top.view;
-            NSMutableArray *cells = [NSMutableArray array];
-            void (^findCells)(UIView *) = ^(UIView *vv) {
-                if ([vv isKindOfClass:[UITableViewCell class]]) [cells addObject:vv];
-                for (UIView *sv in vv.subviews) findCells(sv);
-            };
-            findCells(v);
-            for (UITableViewCell *cell in cells) {
-                for (UIView *sv in cell.subviews) {
-                    if (sv.tag == 77777) { [sv removeFromSuperview]; }
-                }
-            }
+            // 密码对了:通知用户手动点一次
+            UIAlertController *tip = [UIAlertController alertControllerWithTitle:@"已解锁" message:@"请再次点击收藏" preferredStyle:UIAlertControllerStyleAlert];
+            [tip addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+            [top presentViewController:tip animated:YES completion:nil];
         }
     }]];
     [top presentViewController:alert animated:YES completion:nil];
