@@ -72,6 +72,34 @@ static void WXShowSettings(void) {
 - (void)onBtn { WXShowSettings(); }
 @end
 
+static void WXShowPasswordAlert(UIViewController *fromVC) {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏上锁" message:@"请输入密码" preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"密码";
+        tf.secureTextEntry = YES;
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
+        UITextField *tf = alert.textFields.firstObject;
+        if ([tf.text isEqualToString:@"1234"]) {
+            gFavUnlocked = YES;
+            // 手动打开收藏
+            UIViewController *vc = WXTopVC();
+            while (vc) {
+                if ([NSStringFromClass([vc class]) isEqualToString:@"MoreViewController"]) {
+                    if ([vc respondsToSelector:@selector(showFavoriteView)]) {
+                        ((void(*)(id, SEL))objc_msgSend)(vc, @selector(showFavoriteView));
+                    }
+                    break;
+                }
+                vc = vc.navigationController.topViewController;
+                break;
+            }
+        }
+    }]];
+    [fromVC presentViewController:alert animated:YES completion:nil];
+}
+
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         Class voipCls = NSClassFromString(@"VoIPCallerViewController");
@@ -104,36 +132,49 @@ static void WXInstall(void) {
             }
         }
 
-        // 收藏上锁: hook MMUIViewController的showFavoriteView
-        Class mmCls = NSClassFromString(@"MMUIViewController");
-        if (mmCls) {
-            Method m = class_getInstanceMethod(mmCls, @selector(showFavoriteView));
-            if (m) {
-                __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self) {
-                    // 只在"我"页面拦截
-                    NSString *clsName = NSStringFromClass([self class]);
-                    if ([clsName isEqualToString:@"MoreViewController"] && WXGet(kWXKeyFavLock) && !gFavUnlocked) {
-                        UIViewController *vc = (UIViewController *)self;
-                        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏上锁" message:@"请输入密码" preferredStyle:UIAlertControllerStyleAlert];
-                        [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
-                            tf.placeholder = @"密码";
-                            tf.secureTextEntry = YES;
-                        }];
-                        [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
-                        [alert addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a) {
-                            UITextField *tf = alert.textFields.firstObject;
-                            if ([tf.text isEqualToString:@"1234"]) {
-                                gFavUnlocked = YES;
-                                ((void(*)(id, SEL))orig)(self, @selector(showFavoriteView));
-                            }
-                        }]];
-                        [vc presentViewController:alert animated:YES completion:nil];
-                    } else {
-                        ((void(*)(id, SEL))orig)(self, @selector(showFavoriteView));
-                    }
-                }));
-            }
+        // 收藏上锁: hook UITableView的setDelegate:,然后在delegate上hook选中方法
+        Class tvCls = [UITableView class];
+        Method m = class_getInstanceMethod(tvCls, @selector(setDelegate:));
+        if (m) {
+            __block IMP orig = method_getImplementation(m);
+            method_setImplementation(m, imp_implementationWithBlock(^(id self, id delegate) {
+                ((void(*)(id, SEL, id))orig)(self, @selector(setDelegate:), delegate);
+                if (!delegate) return;
+                // 只hook MoreViewController的delegate
+                NSString *clsName = NSStringFromClass([delegate class]);
+                if (![clsName isEqualToString:@"MoreViewController"]) return;
+                // hook delegate的tableView:didSelectRowAtIndexPath:方法
+                SEL sel = @selector(tableView:didSelectRowAtIndexPath:);
+                Method dm = class_getInstanceMethod([delegate class], sel);
+                if (dm) {
+                    __block IMP origD = method_getImplementation(dm);
+                    method_setImplementation(dm, imp_implementationWithBlock(^(id delegate, UITableView *tv, NSIndexPath *ip) {
+                        // 先调用原来的方法
+                        ((void(*)(id, SEL, UITableView *, NSIndexPath *))origD)(delegate, sel, tv, ip);
+                        // 检查是不是点了收藏
+                        if (WXGet(kWXKeyFavLock) && !gFavUnlocked) {
+                            @try {
+                                UITableViewCell *cell = [tv cellForRowAtIndexPath:ip];
+                                // 找cell里的label
+                                BOOL isFav = NO;
+                                for (UIView *sv in cell.subviews) {
+                                    if ([sv isKindOfClass:[UILabel class]]) {
+                                        UILabel *lb = (UILabel *)sv;
+                                        if ([lb.text isEqualToString:@"收藏"]) { isFav = YES; break; }
+                                    }
+                                }
+                                if (isFav) {
+                                    // 取消刚打开的收藏页,弹密码框
+                                    UIViewController *vc = WXTopVC();
+                                    [vc dismissViewControllerAnimated:NO completion:nil];
+                                    // 直接弹密码框
+                                    WXShowPasswordAlert(vc);
+                                }
+                            } @catch (__unused NSException *e) {}
+                        }
+                    }));
+                }
+            }));
         }
 
         for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
