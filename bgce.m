@@ -112,6 +112,7 @@ static void WXInstall(void) {
                             [b setTitle:@"美" forState:UIControlStateNormal];
                             [b setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
                             b.tag = 99999;
+                            [b addTarget:[WXBtnTarget shared] action:@selector(onBtn) forControlEvents:UIControlEventTouchUpInside];
                             [v addSubview:b];
                         }
                     } @catch (__unused NSException *e) {}
@@ -163,17 +164,17 @@ static void WXInstall(void) {
             }
         }
 
-        // === 3. 收藏列表 MyFavoritesViewController: 直接拦截 ===
+        // === 3. 收藏列表 MyFavoritesViewController: 在页面显示前拦截 ===
         Class favCls = NSClassFromString(@"MyFavoritesViewController");
         if (favCls) {
-            Method m = class_getInstanceMethod(favCls, @selector(viewDidAppear:));
+            Method m = class_getInstanceMethod(favCls, @selector(viewWillAppear:));
             if (m) {
                 __block IMP orig = method_getImplementation(m);
                 method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
-                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
                     if (WXGet(kWXKeyFavLock)) {
-                        // 弹密码框
+                        // 先弹密码框,再调用原始方法(页面内容会在后面显示,但被密码框挡住)
                         UIViewController *vc = (UIViewController *)self;
+                        ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewWillAppear:), animated);
                         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
                         [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
                         [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a){
@@ -183,7 +184,9 @@ static void WXInstall(void) {
                             // 密码正确就留在收藏页
                         }]];
                         [vc presentViewController:alert animated:YES completion:nil];
+                        return;
                     }
+                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewWillAppear:), animated);
                 }));
             }
         }
