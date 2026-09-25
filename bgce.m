@@ -73,6 +73,19 @@ static void WXShowSettings(void) {
 - (void)onBtn { WXShowSettings(); }
 @end
 
+// 递归找包含指定文字的label
+static UILabel *WXFindLabel(UIView *v, NSString *text) {
+    if ([v isKindOfClass:[UILabel class]]) {
+        UILabel *lb = (UILabel *)v;
+        if (lb.text && [lb.text isEqualToString:text]) return lb;
+    }
+    for (UIView *sv in v.subviews) {
+        UILabel *lb = WXFindLabel(sv, text);
+        if (lb) return lb;
+    }
+    return nil;
+}
+
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         Class voipCls = NSClassFromString(@"VoIPCallerViewController");
@@ -105,7 +118,7 @@ static void WXInstall(void) {
             }
         }
 
-        // 收藏上锁: 直接调用setShowFavoriteBool:方法
+        // 收藏上锁: 找到"收藏"label,隐藏它的cell
         Class moreCls = NSClassFromString(@"MoreViewController");
         if (moreCls) {
             Method m = class_getInstanceMethod(moreCls, @selector(viewDidAppear:));
@@ -114,11 +127,19 @@ static void WXInstall(void) {
                 method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
                     ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
                     if (!WXGet(kWXKeyFavLock)) return;
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                         @try {
-                            // 检查self是否响应setShowFavoriteBool:
-                            if ([self respondsToSelector:@selector(setShowFavoriteBool:)]) {
-                                ((void(*)(id, SEL, BOOL))objc_msgSend)(self, @selector(setShowFavoriteBool:), NO);
+                            UIView *rootView = [(UIViewController *)self view];
+                            UILabel *favLabel = WXFindLabel(rootView, @"收藏");
+                            if (favLabel) {
+                                // 向上找cell
+                                UIView *v = favLabel;
+                                while (v && ![v isKindOfClass:[UITableViewCell class]]) {
+                                    v = v.superview;
+                                }
+                                if (v) {
+                                    v.hidden = YES;
+                                }
                             }
                         } @catch (__unused NSException *e) {}
                     });
