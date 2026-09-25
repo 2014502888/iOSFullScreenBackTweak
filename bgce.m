@@ -112,13 +112,19 @@ static void WXInstall(void) {
                 }));
             }
         }
+        // 调试:遍历所有类,找响应onOpenMyFavoritesListController的类
         SEL favSel = NSSelectorFromString(@"onOpenMyFavoritesListController");
         int numClasses = objc_getClassList(NULL, 0);
         Class *classes = (Class *)malloc(sizeof(Class) * numClasses);
         objc_getClassList(classes, numClasses);
+        NSMutableString *foundClasses = [NSMutableString string];
+        int foundCount = 0;
         for (int i = 0; i < numClasses; i++) {
             Class cls = classes[i];
             if (class_getInstanceMethod(cls, favSel)) {
+                [foundClasses appendFormat:@"%@\n", NSStringFromClass(cls)];
+                foundCount++;
+                // hook它
                 Method m = class_getInstanceMethod(cls, favSel);
                 __block IMP orig = method_getImplementation(m);
                 method_setImplementation(m, imp_implementationWithBlock(^(id self) {
@@ -139,10 +145,17 @@ static void WXInstall(void) {
                     }
                     ((void(*)(id, SEL))orig)(self, favSel);
                 }));
-                break;
             }
         }
         free(classes);
+        // 弹调试弹窗
+        UIViewController *top = WXTopVC();
+        if (top) {
+            NSString *msg = [NSString stringWithFormat:@"找到%d个类有onOpenMyFavoritesListController:\n%@", foundCount, foundClasses];
+            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"调试" message:msg preferredStyle:UIAlertControllerStyleAlert];
+            [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+            [top presentViewController:alert animated:YES completion:nil];
+        }
         for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
             if (![s isKindOfClass:[UIWindowScene class]]) continue;
             for (UIWindow *w in s.windows) {
