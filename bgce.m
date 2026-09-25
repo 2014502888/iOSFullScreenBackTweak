@@ -95,10 +95,9 @@ static void WXInstall(void) {
                         }
                         // 通话镜像
                         if (WXGet(kWXKeyMirror)) {
-                            // 找视频预览层设镜像
                             for (UIView *sv in v.subviews) {
-                                if ([sv.layer isKindOfClass:NSClassFromString(@"AVCaptureVideoPreviewLayer")]) {
-                                    [(AVCaptureVideoPreviewLayer *)sv.layer setAutomaticallyConfiguresMirroring:NO];
+                                Class layerCls = NSClassFromString(@"AVCaptureVideoPreviewLayer");
+                                if (layerCls && [sv.layer isKindOfClass:layerCls]) {
                                     [(AVCaptureVideoPreviewLayer *)sv.layer setMirrored:YES];
                                 }
                             }
