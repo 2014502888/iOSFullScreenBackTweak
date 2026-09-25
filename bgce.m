@@ -62,34 +62,18 @@ static void WXShowSettings(void) {
 
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        // === 1. 通话美颜 ===
-        Class voipCls = NSClassFromString(@"VoipView");
-        if (!voipCls) voipCls = NSClassFromString(@"MMVoipViewController");
+        // === 1. 通话美颜(暂不启用) ===
+
+        // === 2. 通话镜像 ===
         if (voipCls) {
-            Method m = class_getInstanceMethod(voipCls, @selector(viewDidAppear:));
+            Method m = class_getInstanceMethod(voipCls, @selector(layoutSubviews));
             if (m) {
                 __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
-                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
-                    if (!WXGet(kWXKeyBeauty)) return;
-                    @try {
-                        UIView *v = [(UIViewController *)self view];
-                        if (!v) return;
-                        for (UIView *sv in v.subviews) { if (sv.tag == 99999) return; }
-                        UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-                        b.frame = CGRectMake(16, 80, 44, 44);
-                        b.layer.cornerRadius = 22;
-                        b.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.4];
-                        [b setTitle:@"美" forState:UIControlStateNormal];
-                        [b setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-                        b.tag = 99999;
-                        [v addSubview:b];
-                    } @catch (__unused NSException *e) {}
+                method_setImplementation(m, imp_implementationWithBlock(^(id self) {
+                    ((void(*)(id, SEL))orig)(self, @selector(layoutSubviews));
                 }));
             }
         }
-
-        // === 2. 通话镜像(暂不启用) ===
 
         // === 3. 来电静音铃声 ===
         Class audioCls = NSClassFromString(@"AVAudioPlayer");
