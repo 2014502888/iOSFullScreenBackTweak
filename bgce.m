@@ -54,34 +54,6 @@ static void WXShowSettings(void) {
     [ac addAction:[UIAlertAction actionWithTitle:fl ? @"✓ 收藏上锁: 开" : @"  收藏上锁: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyFavLock, !fl); }]];
     BOOL qe = WXGet(kWXKeyQuickEdit);
     [ac addAction:[UIAlertAction actionWithTitle:qe ? @"✓ 快捷发送编辑: 开" : @"  快捷发送编辑: 关" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){ WXSet(kWXKeyQuickEdit, !qe); }]];
-    // 调试:扫描所有类,找实现了关键方法的类名
-    [ac addAction:[UIAlertAction actionWithTitle:@"调试: 扫描Hook类名" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-        NSMutableString *result = [NSMutableString string];
-        unsigned int total = 0;
-        Class *classes = objc_copyClassList(&total);
-        NSArray *sels = @[@"openVideoWindowWithContact:msgWrap:isCaller:from:",
-                          @"openAudioWindowWithContact:msgWrap:isCaller:from:",
-                          @"onOpenMyFavoritesListController",
-                          @"didFinishPickingImageWithEditImageAttr:"];
-        for (NSString *selName in sels) {
-            [result appendFormat:@"【%@】\n", selName];
-            BOOL found = NO;
-            SEL sel = NSSelectorFromString(selName);
-            for (unsigned int i = 0; i < total; i++) {
-                if (class_getInstanceMethod(classes[i], sel)) {
-                    [result appendFormat:@"  %@\n", NSStringFromClass(classes[i])];
-                    found = YES;
-                }
-            }
-            if (!found) [result appendFormat:@"  (未找到)\n"];
-            [result appendString:@"\n"];
-        }
-        free(classes);
-        UIViewController *t = WXTopVC();
-        UIAlertController *dbg = [UIAlertController alertControllerWithTitle:@"扫描结果" message:result preferredStyle:UIAlertControllerStyleAlert];
-        [dbg addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleDefault handler:nil]];
-        [t presentViewController:dbg animated:YES completion:nil];
-    }]];
     [ac addAction:[UIAlertAction actionWithTitle:@"关闭" style:UIAlertActionStyleCancel handler:nil]];
     [top presentViewController:ac animated:YES completion:nil];
 }
@@ -100,68 +72,101 @@ static void WXShowSettings(void) {
 - (void)onBtn { WXShowSettings(); }
 @end
 
+// 找实现了某个方法的类
+static Class WXFindClassWithSelector(SEL sel) {
+    unsigned int total = 0;
+    Class *classes = objc_copyClassList(&total);
+    Class found = nil;
+    for (unsigned int i = 0; i < total; i++) {
+        if (class_getInstanceMethod(classes[i], sel)) {
+            found = classes[i];
+            break;
+        }
+    }
+    free(classes);
+    return found;
+}
+
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        // hook MMUIViewController(微信所有页面的基类)
-        Class baseCls = NSClassFromString(@"MMUIViewController");
-        if (baseCls) {
-            Method m = class_getInstanceMethod(baseCls, @selector(viewDidAppear:));
+
+        // === 1. 通话美颜/镜像:hook openVideoWindowWithContact 方法 ===
+        SEL videoSel = NSSelectorFromString(@"openVideoWindowWithContact:msgWrap:isCaller:from:");
+        SEL audioSel = NSSelectorFromString(@"openAudioWindowWithContact:msgWrap:isCaller:from:");
+        Class callCls = WXFindClassWithSelector(videoSel);
+        if (!callCls) callCls = WXFindClassWithSelector(audioSel);
+        if (callCls) {
+            NSLog(@"[bgce] 通话类: %@", NSStringFromClass(callCls));
+            // hook openVideoWindow
+            Method m = class_getInstanceMethod(callCls, videoSel);
             if (m) {
                 __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
-                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
-                    @try {
-                        NSString *clsName = NSStringFromClass([self class]);
-                        UIView *v = [(UIViewController *)self view];
-                        if (!v) return;
-
-                        // 通话页面:加美颜按钮
-                        if (WXGet(kWXKeyBeauty) &&
-                            ([clsName containsString:@"Voip"] || [clsName containsString:@"Call"] || [clsName containsString:@"VideoChat"] || [clsName containsString:@"Talk"])) {
-                            for (UIView *sv in v.subviews) { if (sv.tag == 99999) return; }
-                            UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
-                            b.frame = CGRectMake(16, 80, 44, 44);
-                            b.layer.cornerRadius = 22;
-                            b.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.4];
-                            [b setTitle:@"美" forState:UIControlStateNormal];
-                            [b setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
-                            b.tag = 99999;
-                            [v addSubview:b];
-                        }
-
-                        // 收藏上锁:在"我"页面找收藏cell隐藏
-                        if (WXGet(kWXKeyFavLock) &&
-                            ([clsName containsString:@"Setting"] || [clsName containsString:@"MainPage"] || [clsName containsString:@"Mine"])) {
-                            for (UIView *sv in v.subviews) {
-                                if ([sv isKindOfClass:[UITableView class]]) {
-                                    UITableView *tv = (UITableView *)sv;
-                                    for (UITableViewCell *cell in tv.visibleCells) {
-                                        if ([cell.textLabel.text containsString:@"收藏"]) {
-                                            cell.hidden = YES;
-                                            cell.alpha = 0.0;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } @catch (__unused NSException *e) {}
+                method_setImplementation(m, imp_implementationWithBlock(^(id self, id contact, id msgWrap, BOOL isCaller, id from) {
+                    ((void(*)(id, SEL, id, id, BOOL, id))orig)(self, videoSel, contact, msgWrap, isCaller, from);
+                    if (WXGet(kWXKeyBeauty)) {
+                        // 视频通话开始,可以加美颜
+                        NSLog(@"[bgce] 视频通话开始");
+                    }
+                }));
+            }
+            // hook openAudioWindow
+            m = class_getInstanceMethod(callCls, audioSel);
+            if (m) {
+                __block IMP orig = method_getImplementation(m);
+                method_setImplementation(m, imp_implementationWithBlock(^(id self, id contact, id msgWrap, BOOL isCaller, id from) {
+                    ((void(*)(id, SEL, id, id, BOOL, id))orig)(self, audioSel, contact, msgWrap, isCaller, from);
+                    if (WXGet(kWXKeyMuteRingtone)) {
+                        // 语音通话开始,静音拨号音
+                        NSLog(@"[bgce] 语音通话开始");
+                        @try {
+                            AVAudioSession *session = [AVAudioSession sharedInstance];
+                            [session setCategory:AVAudioSessionCategoryRecord error:nil];
+                        } @catch (__unused NSException *e) {}
+                    }
                 }));
             }
         }
 
-        // 拨号静音:hook AVAudioSession,通话时设为只录音
-        Class sesCls = NSClassFromString(@"AVAudioSession");
-        if (sesCls) {
-            Method m = class_getInstanceMethod(sesCls, @selector(setCategory:error:));
+        // === 2. 收藏上锁:hook onOpenMyFavoritesListController ===
+        SEL favSel = NSSelectorFromString(@"onOpenMyFavoritesListController");
+        Class favCls = WXFindClassWithSelector(favSel);
+        if (favCls) {
+            NSLog(@"[bgce] 收藏类: %@", NSStringFromClass(favCls));
+            Method m = class_getInstanceMethod(favCls, favSel);
             if (m) {
                 __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self, NSString *cat, NSError **err) {
-                    if (WXGet(kWXKeyMuteRingtone) &&
-                        ([cat isEqualToString:@"AVAudioSessionCategoryPlayAndRecord"] || [cat isEqualToString:@"AVAudioSessionCategoryRecord"])) {
-                        // 保持静音模式,不播放拨号音
+                method_setImplementation(m, imp_implementationWithBlock(^(id self) {
+                    if (WXGet(kWXKeyFavLock)) {
+                        // 弹密码框或直接拦截
+                        UIViewController *top = WXTopVC();
+                        if (top) {
+                            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"请输入密码" preferredStyle:UIAlertControllerStyleAlert];
+                            [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+                                tf.secureTextEntry = YES;
+                            }];
+                            [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+                            [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+                                UITextField *tf = alert.textFields.firstObject;
+                                if ([tf.text isEqualToString:@"1234"]) {
+                                    ((void(*)(id, SEL))orig)(self, favSel);
+                                }
+                            }]];
+                            [top presentViewController:alert animated:YES completion:nil];
+                            return;
+                        }
                     }
-                    ((void(*)(id, SEL, NSString *, NSError **))orig)(self, @selector(setCategory:error:), cat, err);
+                    ((void(*)(id, SEL))orig)(self, favSel);
                 }));
+            }
+        }
+
+        // === 3. 快捷发送编辑图片:hook MMImagePickerController ===
+        Class pickerCls = NSClassFromString(@"MMImagePickerController");
+        if (pickerCls) {
+            SEL pickSel = NSSelectorFromString(@"didFinishPickingImageWithEditImageAttr:");
+            Method m = class_getInstanceMethod(pickerCls, pickSel);
+            if (m) {
+                NSLog(@"[bgce] MMImagePickerController hook成功");
             }
         }
 
@@ -188,7 +193,7 @@ static void WXInstall(void) {
 }
 
 __attribute__((constructor)) static void WXConstructor(void) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
                    dispatch_get_main_queue(), ^{ WXInstall(); });
     [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
                                                       object:nil queue:nil
