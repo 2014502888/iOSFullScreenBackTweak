@@ -73,6 +73,9 @@ static void WXShowSettings(void) {
 - (void)onBtn { WXShowSettings(); }
 @end
 
+// 全局保存原始的tableView:didSelectRowAtIndexPath:实现
+static IMP origTableViewDidSelect = NULL;
+
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         // 1. 通话页面
@@ -113,49 +116,57 @@ static void WXInstall(void) {
                 }));
             }
         }
-        // 2. 收藏页:进入后盖黑遮罩+弹密码框
-        Class favCls = NSClassFromString(@"MyFavoritesViewController");
-        if (favCls) {
-            Method m = class_getInstanceMethod(favCls, @selector(viewDidAppear:));
-            if (m) {
-                __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
-                    ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
-                    if (!WXGet(kWXKeyFavLock)) return;
-                    @try {
-                        UIViewController *vc = (UIViewController *)self;
-                        BOOL hasCover = NO;
-                        for (UIView *sv in vc.view.subviews) { if (sv.tag == 88888) { hasCover = YES; break; } }
-                        if (!hasCover) {
-                            UIView *cover = [[UIView alloc] initWithFrame:vc.view.bounds];
-                            cover.backgroundColor = [UIColor blackColor];
-                            cover.tag = 88888;
-                            cover.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-                            [vc.view addSubview:cover];
-                        }
-                        static BOOL hasAlert = NO;
-                        if (!hasAlert) {
-                            hasAlert = YES;
-                            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
-                            [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
-                            [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a){
-                                hasAlert = NO;
-                                [vc.navigationController popViewControllerAnimated:YES];
-                            }]];
-                            [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-                                hasAlert = NO;
-                                if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
-                                    for (UIView *sv in vc.view.subviews) {
-                                        if (sv.tag == 88888) { [sv removeFromSuperview]; break; }
+
+        // 2. hook UITableView的setDelegate:,当delegate被设置后,再hook delegate的选中方法
+        Class tvCls = [UITableView class];
+        Method m = class_getInstanceMethod(tvCls, @selector(setDelegate:));
+        if (m) {
+            __block IMP orig = method_getImplementation(m);
+            method_setImplementation(m, imp_implementationWithBlock(^(UITableView *self, id delegate) {
+                ((void(*)(id, SEL, id))orig)(self, @selector(setDelegate:), delegate);
+                if (delegate && !origTableViewDidSelect) {
+                    SEL sel = @selector(tableView:didSelectRowAtIndexPath:);
+                    Method dm = class_getInstanceMethod([delegate class], sel);
+                    if (dm) {
+                        origTableViewDidSelect = method_getImplementation(dm);
+                        method_setImplementation(dm, imp_implementationWithBlock(^(id delegateSelf, UITableView *tv, NSIndexPath *ip) {
+                            if (WXGet(kWXKeyFavLock) &&
+                                [NSStringFromClass([delegateSelf class]) isEqualToString:@"MoreViewController"]) {
+                                UITableViewCell *cell = [tv cellForRowAtIndexPath:ip];
+                                // 递归找cell里的所有label
+                                NSString *text = nil;
+                                NSMutableArray *labels = [NSMutableArray array];
+                                void (^findLabels)(UIView *) = ^(UIView *v) {
+                                    if ([v isKindOfClass:[UILabel class]]) [labels addObject:v];
+                                    for (UIView *sv in v.subviews) findLabels(sv);
+                                };
+                                findLabels(cell);
+                                for (UILabel *lb in labels) {
+                                    if (lb.text && [lb.text containsString:@"收藏"]) text = lb.text;
+                                }
+                                if (text && [text containsString:@"收藏"]) {
+                                    UIViewController *top = WXTopVC();
+                                    if (top) {
+                                        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
+                                        [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
+                                        [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+                                        [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+                                            if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
+                                                ((void(*)(id, SEL, id, id))origTableViewDidSelect)(delegateSelf, sel, tv, ip);
+                                            }
+                                        }]];
+                                        [top presentViewController:alert animated:YES completion:nil];
+                                        return;
                                     }
                                 }
-                            }]];
-                            [vc presentViewController:alert animated:YES completion:nil];
-                        }
-                    } @catch (__unused NSException *e) {}
-                }));
-            }
+                            }
+                            ((void(*)(id, SEL, id, id))origTableViewDidSelect)(delegateSelf, sel, tv, ip);
+                        }));
+                    }
+                }
+            }));
         }
+
         // 悬浮按钮
         for (UIWindowScene *s in [UIApplication sharedApplication].connectedScenes) {
             if (![s isKindOfClass:[UIWindowScene class]]) continue;
