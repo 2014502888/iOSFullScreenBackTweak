@@ -73,16 +73,6 @@ static void WXShowSettings(void) {
 - (void)onBtn { WXShowSettings(); }
 @end
 
-// 递归找tableView
-static UITableView *WXFindTableView(UIView *v) {
-    if ([v isKindOfClass:[UITableView class]]) return (UITableView *)v;
-    for (UIView *sv in v.subviews) {
-        UITableView *t = WXFindTableView(sv);
-        if (t) return t;
-    }
-    return nil;
-}
-
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         Class voipCls = NSClassFromString(@"VoIPCallerViewController");
@@ -97,14 +87,6 @@ static void WXInstall(void) {
                         if (WXGet(kWXKeyMuteRingtone)) {
                             AVAudioSession *session = [AVAudioSession sharedInstance];
                             [session setCategory:AVAudioSessionCategoryRecord error:nil];
-                        }
-                        if (WXGet(kWXKeyMirror)) {
-                            for (UIView *sv in v.subviews) {
-                                Class layerCls = NSClassFromString(@"AVCaptureVideoPreviewLayer");
-                                if (layerCls && [sv.layer isKindOfClass:layerCls]) {
-                                    [(AVCaptureVideoPreviewLayer *)sv.layer setMirrored:YES];
-                                }
-                            }
                         }
                         if (WXGet(kWXKeyBeauty)) {
                             for (UIView *sv in v.subviews) { if (sv.tag == 99999) return; }
@@ -123,7 +105,7 @@ static void WXInstall(void) {
             }
         }
 
-        // 收藏上锁: hook MoreViewController的viewDidAppear,隐藏收藏cell
+        // 调试: hook MoreViewController的viewDidAppear,列出所有label文字
         Class moreCls = NSClassFromString(@"MoreViewController");
         if (moreCls) {
             Method m = class_getInstanceMethod(moreCls, @selector(viewDidAppear:));
@@ -131,19 +113,23 @@ static void WXInstall(void) {
                 __block IMP orig = method_getImplementation(m);
                 method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
                     ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
-                    if (!WXGet(kWXKeyFavLock)) return;
                     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                         @try {
                             UIView *rootView = [(UIViewController *)self view];
-                            UITableView *tv = WXFindTableView(rootView);
-                            if (tv) {
-                                for (UITableViewCell *cell in tv.visibleCells) {
-                                    NSString *text = cell.textLabel.text;
-                                    if (text && [text containsString:@"收藏"]) {
-                                        cell.hidden = YES;
-                                    }
+                            NSMutableArray *texts = [NSMutableArray array];
+                            void (^findLabels)(UIView *) = ^(UIView *v) {
+                                if ([v isKindOfClass:[UILabel class]]) {
+                                    UILabel *lb = (UILabel *)v;
+                                    if (lb.text && lb.text.length > 0) [texts addObject:lb.text];
                                 }
-                            }
+                                for (UIView *sv in v.subviews) findLabels(sv);
+                            };
+                            findLabels(rootView);
+                            NSString *msg = [texts componentsJoinedByString:@"\n"];
+                            UIViewController *vc = (UIViewController *)self;
+                            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"我页面文字" message:msg preferredStyle:UIAlertControllerStyleAlert];
+                            [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
+                            [vc presentViewController:alert animated:YES completion:nil];
                         } @catch (__unused NSException *e) {}
                     });
                 }));
