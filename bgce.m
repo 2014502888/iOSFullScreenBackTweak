@@ -89,22 +89,7 @@ static void WXInstall(void) {
             }
         }
 
-        // === 2. 通话镜像 ===
-        if (voipCls) {
-            Method m = class_getInstanceMethod(voipCls, @selector(layoutSubviews));
-            if (m) {
-                __block IMP orig = method_getImplementation(m);
-                method_setImplementation(m, imp_implementationWithBlock(^(id self) {
-                    ((void(*)(id, SEL))orig)(self, @selector(layoutSubviews));
-                    if (!WXGet(kWXKeyMirror)) return;
-                    @try {
-                        for (UIView *sv in [(UIView *)self subviews]) {
-                            sv.transform = CGAffineTransformMakeScale(-1.0, 1.0);
-                        }
-                    } @catch (__unused NSException *e) {}
-                }));
-            }
-        }
+        // === 2. 通话镜像(暂不启用) ===
 
         // === 3. 来电静音铃声 ===
         Class audioCls = NSClassFromString(@"AVAudioPlayer");
