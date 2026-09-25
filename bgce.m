@@ -120,7 +120,7 @@ static void WXInstall(void) {
             }
         }
 
-        // === 2. "我"页面 MoreViewController: 隐藏收藏cell ===
+        // === 2. "我"页面 MoreViewController: 拦截收藏点击 ===
         Class moreCls = NSClassFromString(@"MoreViewController");
         if (moreCls) {
             Method m = class_getInstanceMethod(moreCls, @selector(viewDidAppear:));
@@ -128,33 +128,38 @@ static void WXInstall(void) {
                 __block IMP orig = method_getImplementation(m);
                 method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
                     ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
-                    if (!WXGet(kWXKeyFavLock)) return;
                     @try {
+                        if (!WXGet(kWXKeyFavLock)) return;
                         UIView *v = [(UIViewController *)self view];
-                        // 递归找所有tableView和cell
+                        UIViewController *vc = (UIViewController *)self;
+                        // 递归找所有包含"收藏"文字的view
                         for (UIView *sv in v.subviews) {
                             if ([sv isKindOfClass:[UITableView class]]) {
                                 UITableView *tv = (UITableView *)sv;
                                 for (UITableViewCell *cell in tv.visibleCells) {
                                     NSString *text = cell.textLabel.text;
                                     if (text && [text containsString:@"收藏"]) {
-                                        cell.hidden = YES;
-                                        cell.alpha = 0.0;
-                                    }
-                                }
-                            }
-                            // 也找UIScrollView里的tableView
-                            if ([sv isKindOfClass:[UIScrollView class]]) {
-                                for (UIView *ssv in sv.subviews) {
-                                    if ([ssv isKindOfClass:[UITableView class]]) {
-                                        UITableView *tv = (UITableView *)ssv;
-                                        for (UITableViewCell *cell in tv.visibleCells) {
-                                            NSString *text = cell.textLabel.text;
-                                            if (text && [text containsString:@"收藏"]) {
-                                                cell.hidden = YES;
-                                                cell.alpha = 0.0;
-                                            }
-                                        }
+                                        // 在cell上盖一个透明按钮拦截点击
+                                        UIButton *blockBtn = [UIButton buttonWithType:UIButtonTypeCustom];
+                                        blockBtn.frame = cell.bounds;
+                                        blockBtn.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+                                        [blockBtn addEventHandler:^(UIButton *btn) {
+                                            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
+                                            [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
+                                            [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:nil]];
+                                            [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
+                                                if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
+                                                    // 密码对了,移除拦截按钮,模拟点击
+                                                    [btn removeFromSuperview];
+                                                    NSIndexPath *ip = [tv indexPathForCell:cell];
+                                                    if (ip && [tv.delegate respondsToSelector:@selector(tableView:didSelectRowAtIndexPath:)]) {
+                                                        [tv.delegate tableView:tv didSelectRowAtIndexPath:ip];
+                                                    }
+                                                }
+                                            }]];
+                                            [vc presentViewController:alert animated:YES completion:nil];
+                                        } forControlEvents:UIControlEventTouchUpInside];
+                                        [cell addSubview:blockBtn];
                                     }
                                 }
                             }
@@ -164,7 +169,7 @@ static void WXInstall(void) {
             }
         }
 
-        // === 3. 收藏列表 MyFavoritesViewController: 弹出密码框+遮挡内容 ===
+        // === 3. 收藏列表 MyFavoritesViewController: 进入后也盖黑遮罩 ===
         Class favCls = NSClassFromString(@"MyFavoritesViewController");
         if (favCls) {
             Method m = class_getInstanceMethod(favCls, @selector(viewDidAppear:));
@@ -175,22 +180,22 @@ static void WXInstall(void) {
                     if (!WXGet(kWXKeyFavLock)) return;
                     @try {
                         UIViewController *vc = (UIViewController *)self;
-                        // 加一个全屏遮挡view
+                        // 盖黑色遮罩挡住内容
                         UIView *cover = [[UIView alloc] initWithFrame:vc.view.bounds];
                         cover.backgroundColor = [UIColor blackColor];
                         cover.tag = 88888;
                         cover.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
                         [vc.view addSubview:cover];
-                        // 弹密码框
                         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"收藏已锁定" message:@"输入密码" preferredStyle:UIAlertControllerStyleAlert];
                         [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) { tf.secureTextEntry = YES; }];
                         [alert addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *a){
                             [vc.navigationController popViewControllerAnimated:YES];
                         }]];
                         [alert addAction:[UIAlertAction actionWithTitle:@"解锁" style:UIAlertActionStyleDefault handler:^(UIAlertAction *a){
-                            // 移除遮挡
-                            for (UIView *sv in vc.view.subviews) {
-                                if (sv.tag == 88888) { [sv removeFromSuperview]; break; }
+                            if ([alert.textFields.firstObject.text isEqualToString:@"1234"]) {
+                                for (UIView *sv in vc.view.subviews) {
+                                    if (sv.tag == 88888) { [sv removeFromSuperview]; break; }
+                                }
                             }
                         }]];
                         [vc presentViewController:alert animated:YES completion:nil];
