@@ -73,24 +73,6 @@ static void WXShowSettings(void) {
 - (void)onBtn { WXShowSettings(); }
 @end
 
-static UITableView *WXFindTableView(UIView *v) {
-    if ([v isKindOfClass:[UITableView class]]) return (UITableView *)v;
-    for (UIView *sv in v.subviews) {
-        UITableView *t = WXFindTableView(sv);
-        if (t) return t;
-    }
-    return nil;
-}
-
-// 递归找所有UILabel
-static void WXFindLabels(UIView *v, NSMutableString *msg) {
-    if ([v isKindOfClass:[UILabel class]]) {
-        UILabel *lb = (UILabel *)v;
-        if (lb.text && lb.text.length > 0) [msg appendFormat:@"%@\n", lb.text];
-    }
-    for (UIView *sv in v.subviews) WXFindLabels(sv, msg);
-}
-
 static void WXInstall(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         Class voipCls = NSClassFromString(@"VoIPCallerViewController");
@@ -123,6 +105,7 @@ static void WXInstall(void) {
             }
         }
 
+        // 收藏上锁: 直接调用setShowFavoriteBool:方法
         Class moreCls = NSClassFromString(@"MoreViewController");
         if (moreCls) {
             Method m = class_getInstanceMethod(moreCls, @selector(viewDidAppear:));
@@ -130,15 +113,13 @@ static void WXInstall(void) {
                 __block IMP orig = method_getImplementation(m);
                 method_setImplementation(m, imp_implementationWithBlock(^(id self, BOOL animated) {
                     ((void(*)(id, SEL, BOOL))orig)(self, @selector(viewDidAppear:), animated);
-                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    if (!WXGet(kWXKeyFavLock)) return;
+                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                         @try {
-                            UIView *rootView = [(UIViewController *)self view];
-                            NSMutableString *msg = [NSMutableString string];
-                            WXFindLabels(rootView, msg);
-                            UIViewController *vc = (UIViewController *)self;
-                            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"所有文字" message:msg preferredStyle:UIAlertControllerStyleAlert];
-                            [alert addAction:[UIAlertAction actionWithTitle:@"好" style:UIAlertActionStyleDefault handler:nil]];
-                            [vc presentViewController:alert animated:YES completion:nil];
+                            // 检查self是否响应setShowFavoriteBool:
+                            if ([self respondsToSelector:@selector(setShowFavoriteBool:)]) {
+                                ((void(*)(id, SEL, BOOL))objc_msgSend)(self, @selector(setShowFavoriteBool:), NO);
+                            }
                         } @catch (__unused NSException *e) {}
                     });
                 }));
